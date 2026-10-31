@@ -1,5 +1,6 @@
 // =====================
 // JARVIS - Voice Interface
+// Optimized for iPhone / Safari too
 // =====================
 
 const micBtn = document.getElementById('micBtn');
@@ -14,11 +15,12 @@ const sendBtn = document.getElementById('sendBtn');
 let isListening = false;
 let isSpeaking = false;
 let recognition = null;
+let hasGreeted = false;
 
 // ---------- Particles ----------
 function createParticles() {
     const container = document.getElementById('particles');
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 30; i++) {
         const p = document.createElement('div');
         p.className = 'particle';
         p.style.left = Math.random() * 100 + '%';
@@ -36,20 +38,18 @@ function speak(text) {
         return;
     }
 
-    // Ferma eventuale parlato precedente
     window.speechSynthesis.cancel();
 
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'it-IT';
     utterance.rate = 0.95;
-    utterance.pitch = 0.85; // Voce un po' più bassa e sofisticata
+    utterance.pitch = 0.85;
     utterance.volume = 1;
 
-    // Cerca una voce italiana di qualità
     const voices = speechSynthesis.getVoices();
     const italianVoice = voices.find(v => 
         v.lang.startsWith('it') && 
-        (v.name.includes('Google') || v.name.includes('Microsoft') || v.name.includes('Luca') || v.name.includes('Alice') || v.name.includes('Natural'))
+        (v.name.includes('Google') || v.name.includes('Microsoft') || v.name.includes('Luca') || v.name.includes('Alice') || v.name.includes('Natural') || v.name.includes('Enhanced'))
     ) || voices.find(v => v.lang.startsWith('it'));
 
     if (italianVoice) {
@@ -76,7 +76,6 @@ function speak(text) {
         holoCircle.classList.remove('speaking');
     };
 
-    // Su alcuni browser le voci caricano in ritardo
     if (voices.length === 0) {
         speechSynthesis.onvoiceschanged = () => {
             const updatedVoices = speechSynthesis.getVoices();
@@ -93,8 +92,7 @@ function speak(text) {
 function initRecognition() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-        listeningText.textContent = 'Riconoscimento vocale non supportato su questo browser';
-        micBtn.disabled = true;
+        listeningText.textContent = 'Riconoscimento vocale non supportato. Usa la tastiera.';
         return null;
     }
 
@@ -124,10 +122,10 @@ function initRecognition() {
         console.error('Errore riconoscimento:', event.error);
         stopListening();
         if (event.error === 'no-speech') {
-            speak('Non ho sentito nulla. Prova di nuovo.');
+            addMessage('Non ho sentito nulla. Prova di nuovo.', 'jarvis');
         } else if (event.error === 'not-allowed') {
-            speak('Devi autorizzare il microfono per parlarmi.');
-            listeningText.textContent = 'Autorizza il microfono nelle impostazioni del browser';
+            listeningText.textContent = 'Autorizza il microfono nelle impostazioni';
+            addMessage('Devi autorizzare il microfono per parlarmi.', 'jarvis');
         }
     };
 
@@ -184,61 +182,60 @@ function processCommand(command) {
     const cmd = command.toLowerCase().trim();
     let response = '';
 
-    // Saluti
     if (/(ciao|salve|buongiorno|buonasera|ehi|hey)/.test(cmd)) {
         const hour = new Date().getHours();
         if (hour < 12) response = 'Buongiorno, signore. Come posso assisterla oggi?';
         else if (hour < 18) response = 'Buon pomeriggio. Sono a sua disposizione.';
         else response = 'Buonasera. Pronto per qualsiasi richiesta.';
     }
-    // Ora
     else if (/(che ora|che ore|ora attuale|dimmi l'ora|che ora è)/.test(cmd)) {
         const now = new Date();
         const time = now.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
         response = `Sono le ${time}.`;
     }
-    // Data
     else if (/(che giorno|che data|data di oggi|che giorno è)/.test(cmd)) {
         const now = new Date();
         const date = now.toLocaleDateString('it-IT', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
         response = `Oggi è ${date}.`;
     }
-    // Come stai
     else if (/(come stai|come va|tutto bene)/.test(cmd)) {
         response = 'Tutti i sistemi funzionano a regime ottimale. Grazie per aver chiesto.';
     }
-    // Chi sei
     else if (/(chi sei|presentati|cosa sei)/.test(cmd)) {
         response = 'Sono J.A.R.V.I.S., Just A Rather Very Intelligent System. Il suo assistente personale.';
     }
-    // Ringraziamenti
     else if (/(grazie|ti ringrazio|thanks)/.test(cmd)) {
         response = 'Di nulla, signore. Sono qui per questo.';
     }
-    // Aiuto
     else if (/(aiuto|cosa puoi fare|comandi|help)/.test(cmd)) {
         response = 'Al momento posso dirti l\'ora, la data, risponderti ai saluti e conversare in modo base. Presto avrò molte più funzioni.';
     }
-    // Scherzo / Iron Man
     else if (/(tony stark|iron man|stark)/.test(cmd)) {
         response = 'Il signor Stark non è disponibile al momento. Posso aiutarla io nel frattempo?';
     }
-    // Default
     else {
         response = 'Ho ricevuto il suo messaggio. Sto ancora imparando. Presto potrò fare molto di più.';
     }
 
-    // Rispondi
     setTimeout(() => {
         addMessage(response, 'jarvis');
         speak(response);
-    }, 400);
+    }, 300);
 }
 
 // ---------- Eventi ----------
 micBtn.addEventListener('click', () => {
+    // Prima interazione: saluta (necessario su iPhone)
+    if (!hasGreeted) {
+        hasGreeted = true;
+        const greeting = 'Sistema avviato. Pronto ad assisterti, signore.';
+        addMessage(greeting, 'jarvis');
+        speak(greeting);
+        return;
+    }
+
     if (isListening) {
-        recognition.stop();
+        if (recognition) recognition.stop();
         stopListening();
     } else {
         startListening();
@@ -248,6 +245,9 @@ micBtn.addEventListener('click', () => {
 sendBtn.addEventListener('click', () => {
     const text = textInput.value.trim();
     if (text) {
+        if (!hasGreeted) {
+            hasGreeted = true;
+        }
         addMessage(text, 'user');
         processCommand(text);
         textInput.value = '';
@@ -260,16 +260,10 @@ textInput.addEventListener('keypress', (e) => {
     }
 });
 
-// ---------- Avvio ----------
-window.addEventListener('load', () => {
-    // Aspetta che le voci siano caricate
-    setTimeout(() => {
-        const greeting = 'Sistema avviato. Pronto ad assisterti, signore.';
-        speak(greeting);
-    }, 800);
-});
-
 // Preload voices
 if (window.speechSynthesis) {
     speechSynthesis.getVoices();
+    speechSynthesis.onvoiceschanged = () => {
+        speechSynthesis.getVoices();
+    };
 }
