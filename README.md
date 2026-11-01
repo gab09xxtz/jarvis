@@ -9,11 +9,23 @@ Apri il file `index.html` in un browser moderno (Chrome consigliato) oppure atti
 
 ## Funzionalità attuali
 
-- Interfaccia olografica dark theme con animazioni
+- Interfaccia olografica dark theme con animazioni futuristiche
+- Cerchio centrale che gira continuamente e reagisce quando parli / ascolti
 - **Sintesi vocale** in italiano (Jarvis parla)
 - **Riconoscimento vocale** in italiano (puoi parlare)
+- **Scrivi su note**: di\' "scrivi su note: il testo che vuoi" e scarica automaticamente il file
 - Comandi base: saluti, ora, data, presentazione, ecc.
 - Input testuale di backup
+
+## Come usare le note
+
+Puoi dire o scrivere:
+
+- `scrivi su note: ricorda di comprare il latte`
+- `scrivimi su note: riunione alle 15`
+- `nota: idea per il progetto`
+
+JARVIS creerà un file `.txt` e lo scaricherà automaticamente.
 
 ## Come usarlo
 

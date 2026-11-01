@@ -177,11 +177,78 @@ function addMessage(text, sender) {
     chatLog.scrollTop = chatLog.scrollHeight;
 }
 
-// ---------- Logica comandi base ----------
+// ---------- Funzione Note (download) ----------
+function createAndDownloadNote(content) {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const filename = `nota-jarvis-${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}.txt`;
+
+    const header = `Nota creata da J.A.R.V.I.S.\nData: ${now.toLocaleString('it-IT')}\n\n`;
+    const fullContent = header + content.trim();
+
+    const blob = new Blob([fullContent], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    return filename;
+}
+
+// ---------- Logica comandi ----------
 function processCommand(command) {
     const cmd = command.toLowerCase().trim();
     let response = '';
 
+    // === SCRIVI SU NOTE ===
+    // Accetta: "scrivi su note: ...", "scrivimi su note ...", "nota: ...", "scrivi una nota: ..."
+    const notePatterns = [
+        /^(?:scrivi\s+(?:su\s+)?note?|scrivimi\s+(?:su\s+)?note?|nota|crea\s+(?:una\s+)?nota)\s*[:\-]?\s*(.+)/i,
+        /^(?:scrivi\s+(?:su\s+)?note?|scrivimi\s+(?:su\s+)?note?)\s+(.+)/i
+    ];
+
+    let noteContent = null;
+    for (const pattern of notePatterns) {
+        const match = command.match(pattern);
+        if (match && match[1]) {
+            noteContent = match[1].trim();
+            break;
+        }
+    }
+
+    // Fallback: se inizia con "scrivi su note" anche senza due punti
+    if (!noteContent && /^(scrivi\s+su\s+note|scrivimi\s+su\s+note|scrivi\s+una\s+nota)/i.test(cmd)) {
+        const parts = command.split(/:/);
+        if (parts.length > 1) {
+            noteContent = parts.slice(1).join(':').trim();
+        } else {
+            // Prende tutto dopo le parole chiave
+            noteContent = command.replace(/^(scrivi\s+su\s+note|scrivimi\s+su\s+note|scrivi\s+una\s+nota)\s*/i, '').trim();
+        }
+    }
+
+    if (noteContent && noteContent.length > 0) {
+        try {
+            const filename = createAndDownloadNote(noteContent);
+            response = `Nota salvata e pronta per il download: ${filename}`;
+        } catch (err) {
+            console.error(err);
+            response = 'Si è verificato un errore durante la creazione della nota.';
+        }
+
+        setTimeout(() => {
+            addMessage(response, 'jarvis');
+            speak(response);
+        }, 300);
+        return;
+    }
+
+    // === Altri comandi base ===
     if (/(ciao|salve|buongiorno|buonasera|ehi|hey)/.test(cmd)) {
         const hour = new Date().getHours();
         if (hour < 12) response = 'Buongiorno, signore. Come posso assisterla oggi?';
@@ -208,7 +275,7 @@ function processCommand(command) {
         response = 'Di nulla, signore. Sono qui per questo.';
     }
     else if (/(aiuto|cosa puoi fare|comandi|help)/.test(cmd)) {
-        response = 'Al momento posso dirti l\'ora, la data, risponderti ai saluti e conversare in modo base. Presto avrò molte più funzioni.';
+        response = 'Posso dirti l\'ora e la data, risponderti ai saluti e creare note. Per salvare una nota di\': "scrivi su note: il testo che vuoi". La nota verrà scaricata automaticamente.';
     }
     else if (/(tony stark|iron man|stark)/.test(cmd)) {
         response = 'Il signor Stark non è disponibile al momento. Posso aiutarla io nel frattempo?';
