@@ -1,6 +1,6 @@
 // =====================
 // JARVIS - Voice Interface
-// Particle Orb + Note + Home Automation commands
+// Particle Orb + Notes + Home Automation + Gemini AI
 // =====================
 
 const micBtn = document.getElementById('micBtn');
@@ -19,6 +19,11 @@ let isSpeaking = false;
 let recognition = null;
 let hasGreeted = false;
 
+// ========== GEMINI API ==========
+// INCOLLA QUI LA TUA API KEY DI GEMINI (tra gli apici)
+const GEMINI_API_KEY = 'INSERISCI_QUI_LA_TUA_API_KEY';
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
+
 // ---------- Simulated Home State ----------
 const home = {
     lights: {
@@ -33,9 +38,9 @@ const home = {
     volume: 40,
     tv: false,
     musica: false,
-    sveglia: null,
     timer: null,
-    listaSpesa: []
+    listaSpesa: [],
+    promemoria: []
 };
 
 // ---------- Particle Orb ----------
@@ -99,8 +104,7 @@ function drawOrb() {
             px: cx + x * scale,
             py: cy + y * scale,
             depth: (z + 1.2) / 2.2,
-            size: p.baseSize,
-            offset: p.offset
+            size: p.baseSize
         };
     });
 
@@ -155,7 +159,7 @@ function setOrbState(state) {
 initParticles();
 drawOrb();
 
-// ---------- Background floating particles ----------
+// ---------- Background particles ----------
 function createParticles() {
     const container = document.getElementById('particles');
     for (let i = 0; i < 30; i++) {
@@ -262,7 +266,6 @@ function initRecognition() {
     };
 
     recog.onend = () => stopListening();
-
     return recog;
 }
 
@@ -303,6 +306,13 @@ function addMessage(text, sender) {
     chatLog.scrollTop = chatLog.scrollHeight;
 }
 
+function reply(text) {
+    setTimeout(() => {
+        addMessage(text, 'jarvis');
+        speak(text);
+    }, 250);
+}
+
 // ---------- Note download ----------
 function createAndDownloadNote(content) {
     const now = new Date();
@@ -326,7 +336,51 @@ function createAndDownloadNote(content) {
     return filename;
 }
 
-// ---------- Helpers for home commands ----------
+// ---------- Gemini AI ----------
+async function askGemini(userMessage) {
+    if (!GEMINI_API_KEY || GEMINI_API_KEY === 'INSERISCI_QUI_LA_TUA_API_KEY') {
+        return 'API Key di Gemini non configurata. Apri il file script.js e inserisci la tua chiave.';
+    }
+
+    const systemPrompt = `Sei J.A.R.V.I.S., l'assistente personale intelligente ispirato a Iron Man.
+Rispondi sempre in italiano, in modo cortese, preciso e un po' formale (usa "signore" quando appropriato).
+Risposte brevi e chiare, ideali per essere lette ad alta voce (massimo 2-3 frasi).
+Puoi aiutare con domande generali, curiosità, consigli, calcoli semplici, traduzioni, ecc.`;
+
+    try {
+        setStatus('speaking', 'Sto pensando...');
+        setOrbState('speaking');
+
+        const res = await fetch(GEMINI_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{
+                    role: 'user',
+                    parts: [{ text: systemPrompt + '\n\nDomanda dell\'utente: ' + userMessage }]
+                }],
+                generationConfig: {
+                    temperature: 0.7,
+                    maxOutputTokens: 250
+                }
+            })
+        });
+
+        if (!res.ok) {
+            console.error('Gemini error:', await res.text());
+            return 'Mi dispiace, al momento non riesco a contattare i sistemi avanzati.';
+        }
+
+        const data = await res.json();
+        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        return text ? text.trim() : 'Non ho ricevuto una risposta valida.';
+    } catch (e) {
+        console.error(e);
+        return 'Si è verificato un errore di connessione con i sistemi AI.';
+    }
+}
+
+// ---------- Helpers ----------
 function matchRoom(cmd) {
     if (/soggiorno|salotto|living/.test(cmd)) return 'soggiorno';
     if (/cucina|kitchen/.test(cmd)) return 'cucina';
@@ -350,11 +404,12 @@ function setLight(room, on) {
 }
 
 // ---------- Main command processor ----------
-function processCommand(command) {
+async function processCommand(command) {
     const cmd = command.toLowerCase().trim();
     let response = '';
+    let handled = true;
 
-    // ========== NOTE ==========
+    // ===== NOTE =====
     const notePatterns = [
         /^(?:scrivi\s+(?:su\s+)?note?|scrivimi\s+(?:su\s+)?note?|nota|crea\s+(?:una\s+)?nota)\s*[:\-]?\s*(.+)/i,
         /^(?:scrivi\s+(?:su\s+)?note?|scrivimi\s+(?:su\s+)?note?)\s+(.+)/i
@@ -387,26 +442,22 @@ function processCommand(command) {
         return;
     }
 
-    // ========== LUCI ==========
+    // ===== LUCI =====
     if (/(accendi|attiva|apri).*(luce|luci|illuminazione)/.test(cmd) || /(luce|luci).*(accendi|attiva)/.test(cmd)) {
         const room = matchRoom(cmd) || 'tutte';
-        response = setLight(room, true) || 'Non ho riconosciuto la stanza. Prova con soggiorno, cucina, camera, bagno o tutte.';
+        response = setLight(room, true) || 'Non ho riconosciuto la stanza.';
     }
     else if (/(spegni|disattiva|chiudi).*(luce|luci|illuminazione)/.test(cmd) || /(luce|luci).*(spegni|disattiva)/.test(cmd)) {
         const room = matchRoom(cmd) || 'tutte';
         response = setLight(room, false) || 'Non ho riconosciuto la stanza.';
     }
     else if (/(stato|come sono|sono accese).*(luce|luci)/.test(cmd) || /luci accese/.test(cmd)) {
-        const accese = Object.entries(home.lights)
-            .filter(([k, v]) => v && k !== 'tutte')
-            .map(([k]) => k);
-        response = accese.length
-            ? `Al momento sono accese le luci di: ${accese.join(', ')}.`
-            : 'Tutte le luci sono spente.';
+        const accese = Object.entries(home.lights).filter(([k, v]) => v && k !== 'tutte').map(([k]) => k);
+        response = accese.length ? `Al momento sono accese le luci di: ${accese.join(', ')}.` : 'Tutte le luci sono spente.';
     }
 
-    // ========== TEMPERATURA / CLIMA ==========
-    else if (/(imposta|metti|imposta a|porta a|imposta la temperatura).*(\d+)/.test(cmd) || /temperatura.*(a\s+)?(\d+)/.test(cmd)) {
+    // ===== TEMPERATURA =====
+    else if (/(imposta|metti|porta a|imposta la temperatura).*(\d+)/.test(cmd) || /temperatura.*(a\s+)?(\d+)/.test(cmd)) {
         const match = cmd.match(/(\d{1,2})/);
         if (match) {
             const temp = parseInt(match[1]);
@@ -418,29 +469,29 @@ function processCommand(command) {
             }
         }
     }
-    else if (/(aumenta|alza|più caldo).*(temperatura|clima|riscaldamento)/.test(cmd) || /(temperatura|riscaldamento).*(aumenta|alza)/.test(cmd)) {
+    else if (/(aumenta|alza|più caldo).*(temperatura|clima|riscaldamento)/.test(cmd)) {
         home.temperatura = Math.min(30, home.temperatura + 1);
         response = `Temperatura portata a ${home.temperatura} gradi.`;
     }
-    else if (/(diminuisci|abbassa|più freddo).*(temperatura|clima|riscaldamento)/.test(cmd) || /(temperatura|riscaldamento).*(diminuisci|abbassa)/.test(cmd)) {
+    else if (/(diminuisci|abbassa|più freddo).*(temperatura|clima|riscaldamento)/.test(cmd)) {
         home.temperatura = Math.max(16, home.temperatura - 1);
         response = `Temperatura portata a ${home.temperatura} gradi.`;
     }
-    else if (/(che temperatura|quanta temperatura|temperatura attuale|a quanti gradi)/.test(cmd)) {
+    else if (/(che temperatura|temperatura attuale|a quanti gradi)/.test(cmd)) {
         response = `La temperatura è impostata a ${home.temperatura} gradi.`;
     }
 
-    // ========== TV ==========
-    else if (/(accendi|apri).*(tv|televisione|tele)/.test(cmd) || /(tv|televisione).*(accendi|apri)/.test(cmd)) {
+    // ===== TV =====
+    else if (/(accendi|apri).*(tv|televisione|tele)/.test(cmd)) {
         home.tv = true;
         response = 'Televisione accesa.';
     }
-    else if (/(spegni|chiudi).*(tv|televisione|tele)/.test(cmd) || /(tv|televisione).*(spegni|chiudi)/.test(cmd)) {
+    else if (/(spegni|chiudi).*(tv|televisione|tele)/.test(cmd)) {
         home.tv = false;
         response = 'Televisione spenta.';
     }
 
-    // ========== MUSICA / VOLUME ==========
+    // ===== MUSICA / VOLUME =====
     else if (/(metti|avvia|accendi|riproduci).*(musica|canzone|spotify|playlist)/.test(cmd)) {
         home.musica = true;
         response = 'Musica avviata.';
@@ -449,11 +500,11 @@ function processCommand(command) {
         home.musica = false;
         response = 'Musica fermata.';
     }
-    else if (/(alza|aumenta).*(volume)/.test(cmd) || /volume.*(più|alza|aumenta)/.test(cmd)) {
+    else if (/(alza|aumenta).*(volume)/.test(cmd)) {
         home.volume = Math.min(100, home.volume + 10);
         response = `Volume impostato a ${home.volume}%.`;
     }
-    else if (/(abbassa|diminuisci).*(volume)/.test(cmd) || /volume.*(meno|abbassa|diminuisci)/.test(cmd)) {
+    else if (/(abbassa|diminuisci).*(volume)/.test(cmd)) {
         home.volume = Math.max(0, home.volume - 10);
         response = `Volume impostato a ${home.volume}%.`;
     }
@@ -469,8 +520,8 @@ function processCommand(command) {
         response = 'Audio disattivato.';
     }
 
-    // ========== TIMER ==========
-    else if (/(timer|conta|conta alla rovescia|impostami un timer).*(?:di\s+)?(\d+)\s*(minuti|minuto|secondi|secondo)?/.test(cmd) || /(?:tra|fra)\s+(\d+)\s*(minuti|minuto)/.test(cmd)) {
+    // ===== TIMER =====
+    else if (/(timer|conta|impostami un timer).*(?:di\s+)?(\d+)\s*(minuti|minuto|secondi|secondo)?/.test(cmd) || /(?:tra|fra)\s+(\d+)\s*(minuti|minuto)/.test(cmd)) {
         const match = cmd.match(/(\d+)\s*(minuti|minuto|secondi|secondo)?/);
         if (match) {
             let seconds = parseInt(match[1]);
@@ -499,11 +550,10 @@ function processCommand(command) {
         }
     }
 
-    // ========== LISTA SPESA ==========
+    // ===== LISTA SPESA =====
     else if (/(aggiungi|metti).*(lista|spesa|shopping)\s+(.+)/.test(cmd) || /lista spesa\s*[:\-]\s*(.+)/.test(cmd)) {
         let item = cmd.replace(/(aggiungi|metti)\s+(alla\s+)?(lista|spesa|shopping)\s*/i, '')
-                      .replace(/lista spesa\s*[:\-]\s*/i, '')
-                      .trim();
+                      .replace(/lista spesa\s*[:\-]\s*/i, '').trim();
         if (item) {
             home.listaSpesa.push(item);
             response = `Ho aggiunto "${item}" alla lista della spesa.`;
@@ -519,7 +569,22 @@ function processCommand(command) {
         response = 'Lista della spesa svuotata.';
     }
 
-    // ========== ROUTINE ==========
+    // ===== PROMEMORIA =====
+    else if (/(ricordami|promemoria|ricorda).*(di\s+)?(.+)/.test(cmd)) {
+        const match = command.match(/(?:ricordami|promemoria|ricorda)\s+(?:di\s+)?(.+)/i);
+        if (match && match[1]) {
+            const item = match[1].trim();
+            home.promemoria.push(item);
+            response = `Promemoria aggiunto: ${item}`;
+        }
+    }
+    else if (/(quali sono i|mostrami i|dimmi i|leggi i).*(promemoria|ricordi)/.test(cmd)) {
+        response = home.promemoria.length
+            ? `I tuoi promemoria: ${home.promemoria.join('; ')}.`
+            : 'Non hai promemoria salvati.';
+    }
+
+    // ===== ROUTINE =====
     else if (/(buongiorno|giornata|sveglia|routine mattina|modalità giorno)/.test(cmd) && !/(che ora|che giorno)/.test(cmd)) {
         setLight('tutte', false);
         setLight('soggiorno', true);
@@ -548,7 +613,7 @@ function processCommand(command) {
         response = 'Modalità fuori casa attivata. Ho spento luci, TV e musica. Buona uscita.';
     }
 
-    // ========== INFO BASE ==========
+    // ===== INFO BASE =====
     else if (/(ciao|salve|buongiorno|buonasera|ehi|hey)/.test(cmd) && !/(routine|modalità)/.test(cmd)) {
         const hour = new Date().getHours();
         if (hour < 12) response = 'Buongiorno, signore. Come posso assisterla oggi?';
@@ -567,7 +632,7 @@ function processCommand(command) {
         response = 'Tutti i sistemi funzionano a regime ottimale. Grazie per aver chiesto.';
     }
     else if (/(chi sei|presentati|cosa sei)/.test(cmd)) {
-        response = 'Sono J.A.R.V.I.S., Just A Rather Very Intelligent System. Il suo assistente personale per la casa.';
+        response = 'Sono J.A.R.V.I.S., Just A Rather Very Intelligent System. Il suo assistente personale, ora potenziato con intelligenza artificiale.';
     }
     else if (/(grazie|ti ringrazio|thanks)/.test(cmd)) {
         response = 'Di nulla, signore. Sono qui per questo.';
@@ -575,25 +640,22 @@ function processCommand(command) {
     else if (/(tony stark|iron man|stark)/.test(cmd)) {
         response = 'Il signor Stark non è disponibile al momento. Posso aiutarla io nel frattempo?';
     }
-
-    // ========== AIUTO ==========
     else if (/(aiuto|cosa puoi fare|comandi|help|lista comandi)/.test(cmd)) {
-        response = 'Posso gestire luci (accendi/spegni soggiorno, cucina, camera, bagno o tutte), temperatura, TV, musica e volume, timer, lista della spesa, note e routine (buongiorno, buonanotte, cinema, fuori casa). Dimmi pure cosa ti serve.';
+        response = 'Posso gestire luci, temperatura, TV, musica, volume, timer, lista spesa, promemoria, note e routine. Inoltre ora posso rispondere a domande generali grazie all\'intelligenza artificiale. Provi pure a chiedermi qualsiasi cosa.';
     }
 
-    // ========== FALLBACK ==========
+    // ===== FALLBACK → GEMINI =====
     else {
-        response = 'Non ho ancora collegato questo comando ai dispositivi reali. Per ora posso gestire luci, clima, TV, musica, timer, lista spesa e note. Prova a dirmi "aiuto" per vedere tutti i comandi.';
+        handled = false;
+        response = await askGemini(command);
     }
 
-    reply(response);
-}
-
-function reply(text) {
-    setTimeout(() => {
-        addMessage(text, 'jarvis');
-        speak(text);
-    }, 280);
+    if (handled) {
+        reply(response);
+    } else {
+        addMessage(response, 'jarvis');
+        speak(response);
+    }
 }
 
 // ---------- Events ----------
