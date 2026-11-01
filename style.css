@@ -36,7 +36,7 @@ body {
     z-index: 0;
 }
 
-/* Particles */
+/* Particles background */
 .particles {
     position: fixed;
     inset: 0;
@@ -191,155 +191,51 @@ body {
     gap: 25px;
 }
 
-/* Holographic Circle - Enhanced */
+/* Holographic Particle Sphere */
 .holo-container {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 15px;
+    gap: 18px;
 }
 
 .holo-circle {
     position: relative;
-    width: 200px;
-    height: 200px;
-    border-radius: 50%;
-    background: radial-gradient(circle, rgba(0, 240, 255, 0.1) 0%, transparent 70%);
-    border: 1px solid rgba(0, 240, 255, 0.3);
+    width: 260px;
+    height: 260px;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.4s ease;
-    box-shadow: inset 0 0 50px rgba(0, 240, 255, 0.08);
-    animation: holo-spin 20s linear infinite;
+    transition: transform 0.4s ease, filter 0.4s ease;
 }
 
-/* Continuous slow spin even when idle */
-@keyframes holo-spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-}
-
-/* Outer rotating rings */
-.holo-circle::before,
-.holo-circle::after {
-    content: '';
-    position: absolute;
-    border-radius: 50%;
-    border: 1px solid transparent;
-    pointer-events: none;
-}
-
-.holo-circle::before {
-    inset: -12px;
-    border-top-color: rgba(0, 240, 255, 0.5);
-    border-right-color: rgba(0, 240, 255, 0.2);
-    animation: spin-ring 6s linear infinite;
-}
-
-.holo-circle::after {
-    inset: -24px;
-    border-bottom-color: rgba(0, 240, 255, 0.4);
-    border-left-color: rgba(0, 240, 255, 0.15);
-    animation: spin-ring 10s linear infinite reverse;
-}
-
-@keyframes spin-ring {
-    to { transform: rotate(360deg); }
-}
-
-.holo-circle.active {
-    border-color: var(--cyan);
-    box-shadow: 
-        0 0 40px rgba(0, 240, 255, 0.45),
-        inset 0 0 60px rgba(0, 240, 255, 0.15);
-    animation: holo-spin 4s linear infinite, holo-pulse 1.2s ease-in-out infinite;
-}
-
-.holo-circle.speaking {
-    border-color: #00ffcc;
-    box-shadow: 
-        0 0 50px rgba(0, 255, 200, 0.5),
-        inset 0 0 70px rgba(0, 255, 200, 0.2);
-    animation: holo-spin 2.5s linear infinite, holo-pulse 0.7s ease-in-out infinite;
-}
-
-@keyframes holo-pulse {
-    0%, 100% { transform: scale(1) rotate(0deg); }
-    50% { transform: scale(1.06) rotate(180deg); }
-}
-
-.holo-inner {
-    position: relative;
+.holo-circle canvas {
     width: 100%;
     height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    /* Counter-rotate so the icon stays upright while the circle spins */
-    animation: counter-spin 20s linear infinite;
-}
-
-.holo-circle.active .holo-inner {
-    animation: counter-spin 4s linear infinite;
-}
-
-.holo-circle.speaking .holo-inner {
-    animation: counter-spin 2.5s linear infinite;
-}
-
-@keyframes counter-spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(-360deg); }
-}
-
-.center-icon {
-    width: 52px;
-    height: 52px;
-    color: var(--cyan);
-    opacity: 0.95;
-    z-index: 2;
-    transition: all 0.3s;
-    filter: drop-shadow(0 0 6px rgba(0, 240, 255, 0.6));
-}
-
-.holo-circle.active .center-icon {
-    color: #00ff88;
-    filter: drop-shadow(0 0 12px #00ff88);
-}
-
-.holo-circle.speaking .center-icon {
-    color: #00ffcc;
-    filter: drop-shadow(0 0 14px #00ffcc);
-    animation: icon-pulse 0.6s infinite;
-}
-
-@keyframes icon-pulse {
-    0%, 100% { transform: scale(1); }
-    50% { transform: scale(1.12); }
-}
-
-/* Waves */
-.wave {
-    position: absolute;
-    width: 60px;
-    height: 60px;
-    border: 2px solid var(--cyan);
+    display: block;
     border-radius: 50%;
-    opacity: 0;
 }
 
-.holo-circle.active .wave,
-.holo-circle.speaking .wave {
-    animation: ripple 1.8s infinite;
+/* Soft glow around the orb */
+.holo-circle::before {
+    content: '';
+    position: absolute;
+    inset: -20px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(0, 240, 255, 0.12) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: -1;
+    transition: all 0.4s ease;
 }
 
-.wave-2 { animation-delay: 0.35s !important; }
-.wave-3 { animation-delay: 0.7s !important; }
+.holo-circle.active::before {
+    background: radial-gradient(circle, rgba(0, 255, 136, 0.22) 0%, transparent 70%);
+    inset: -30px;
+}
 
-@keyframes ripple {
-    0% { width: 50px; height: 50px; opacity: 0.85; }
-    100% { width: 180px; height: 180px; opacity: 0; }
+.holo-circle.speaking::before {
+    background: radial-gradient(circle, rgba(0, 255, 200, 0.28) 0%, transparent 70%);
+    inset: -35px;
 }
 
 .listening-text {
@@ -353,10 +249,14 @@ body {
     color: #00ff88;
 }
 
+.holo-circle.speaking ~ .listening-text {
+    color: #00ffcc;
+}
+
 /* Chat Log */
 .chat-log {
     flex: 1;
-    max-height: 280px;
+    max-height: 260px;
     overflow-y: auto;
     padding: 15px;
     background: var(--bg-card);
@@ -539,7 +439,7 @@ body {
 /* Responsive */
 @media (max-width: 600px) {
     .logo h1 { font-size: 1.2rem; letter-spacing: 2px; }
-    .holo-circle { width: 160px; height: 160px; }
+    .holo-circle { width: 210px; height: 210px; }
     .chat-log { max-height: 220px; }
     .mic-btn { width: 60px; height: 60px; }
 }

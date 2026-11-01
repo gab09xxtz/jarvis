@@ -1,6 +1,6 @@
 // =====================
 // JARVIS - Voice Interface
-// Optimized for iPhone / Safari too
+// Particle Orb + Note feature
 // =====================
 
 const micBtn = document.getElementById('micBtn');
@@ -11,13 +11,150 @@ const listeningText = document.getElementById('listeningText');
 const chatLog = document.getElementById('chatLog');
 const textInput = document.getElementById('textInput');
 const sendBtn = document.getElementById('sendBtn');
+const canvas = document.getElementById('orbCanvas');
+const ctx = canvas.getContext('2d');
 
 let isListening = false;
 let isSpeaking = false;
 let recognition = null;
 let hasGreeted = false;
 
-// ---------- Particles ----------
+// ---------- Particle Orb ----------
+const PARTICLE_COUNT = 900;
+let particles = [];
+let rotation = 0;
+let rotationSpeed = 0.004; // idle speed
+let targetSpeed = 0.004;
+let pulse = 0;
+let intensity = 1; // 1 = idle, higher when active
+
+function initParticles() {
+    particles = [];
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+        // Fibonacci sphere distribution for even coverage
+        const phi = Math.acos(1 - 2 * (i + 0.5) / PARTICLE_COUNT);
+        const theta = Math.PI * (1 + Math.sqrt(5)) * i;
+
+        particles.push({
+            x: Math.sin(phi) * Math.cos(theta),
+            y: Math.sin(phi) * Math.sin(theta),
+            z: Math.cos(phi),
+            baseSize: 0.8 + Math.random() * 1.4,
+            offset: Math.random() * Math.PI * 2
+        });
+    }
+}
+
+function drawOrb() {
+    const w = canvas.width;
+    const h = canvas.height;
+    const cx = w / 2;
+    const cy = h / 2;
+    const radius = Math.min(w, h) * 0.38;
+
+    ctx.clearRect(0, 0, w, h);
+
+    // Soft outer glow
+    const glow = ctx.createRadialGradient(cx, cy, radius * 0.3, cx, cy, radius * 1.6);
+    glow.addColorStop(0, `rgba(0, 240, 255, ${0.08 * intensity})`);
+    glow.addColorStop(0.5, `rgba(0, 200, 255, ${0.04 * intensity})`);
+    glow.addColorStop(1, 'transparent');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius * 1.6, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Sort particles by depth (simple painter's algorithm)
+    const projected = particles.map(p => {
+        // Rotate around Y axis
+        const cosY = Math.cos(rotation);
+        const sinY = Math.sin(rotation);
+        let x = p.x * cosY - p.z * sinY;
+        let z = p.x * sinY + p.z * cosY;
+
+        // Slight X tilt for more interesting movement
+        const tilt = 0.35;
+        const cosX = Math.cos(tilt);
+        const sinX = Math.sin(tilt);
+        let y = p.y * cosX - z * sinX;
+        z = p.y * sinX + z * cosX;
+
+        // Breathing / pulse effect
+        const breathe = 1 + Math.sin(pulse + p.offset) * 0.04 * intensity;
+        const scale = radius * breathe;
+
+        const px = cx + x * scale;
+        const py = cy + y * scale;
+        const depth = (z + 1.2) / 2.2; // 0..1 roughly
+
+        return { px, py, depth, size: p.baseSize, offset: p.offset };
+    });
+
+    projected.sort((a, b) => a.depth - b.depth);
+
+    for (const p of projected) {
+        const alpha = 0.25 + p.depth * 0.75;
+        const size = p.size * (0.6 + p.depth * 0.9) * (0.9 + intensity * 0.15);
+
+        // Color shifts slightly when active
+        let r = 0, g = 220, b = 255;
+        if (intensity > 1.3) {
+            // greener when listening
+            g = 255;
+            b = 180;
+        }
+        if (intensity > 1.8) {
+            // brighter cyan when speaking
+            r = 0;
+            g = 255;
+            b = 230;
+        }
+
+        ctx.beginPath();
+        ctx.arc(p.px, p.py, size, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha * 0.9})`;
+        ctx.fill();
+
+        // Small bright core
+        if (p.depth > 0.6) {
+            ctx.beginPath();
+            ctx.arc(p.px, p.py, size * 0.35, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(200, 255, 255, ${alpha * 0.7})`;
+            ctx.fill();
+        }
+    }
+
+    // Update animation state
+    rotationSpeed += (targetSpeed - rotationSpeed) * 0.08;
+    rotation += rotationSpeed;
+    pulse += 0.03 * intensity;
+
+    requestAnimationFrame(drawOrb);
+}
+
+function setOrbState(state) {
+    if (state === 'listening') {
+        targetSpeed = 0.018;
+        intensity = 1.6;
+        holoCircle.classList.add('active');
+        holoCircle.classList.remove('speaking');
+    } else if (state === 'speaking') {
+        targetSpeed = 0.028;
+        intensity = 2.1;
+        holoCircle.classList.add('speaking');
+        holoCircle.classList.remove('active');
+    } else {
+        targetSpeed = 0.004;
+        intensity = 1;
+        holoCircle.classList.remove('active', 'speaking');
+    }
+}
+
+// Init orb
+initParticles();
+drawOrb();
+
+// ---------- Background floating particles ----------
 function createParticles() {
     const container = document.getElementById('particles');
     for (let i = 0; i < 30; i++) {
@@ -31,7 +168,7 @@ function createParticles() {
 }
 createParticles();
 
-// ---------- Speech Synthesis (Jarvis parla) ----------
+// ---------- Speech Synthesis ----------
 function speak(text) {
     if (!window.speechSynthesis) {
         console.warn('Speech Synthesis non supportato');
@@ -47,33 +184,30 @@ function speak(text) {
     utterance.volume = 1;
 
     const voices = speechSynthesis.getVoices();
-    const italianVoice = voices.find(v => 
-        v.lang.startsWith('it') && 
+    const italianVoice = voices.find(v =>
+        v.lang.startsWith('it') &&
         (v.name.includes('Google') || v.name.includes('Microsoft') || v.name.includes('Luca') || v.name.includes('Alice') || v.name.includes('Natural') || v.name.includes('Enhanced'))
     ) || voices.find(v => v.lang.startsWith('it'));
 
-    if (italianVoice) {
-        utterance.voice = italianVoice;
-    }
+    if (italianVoice) utterance.voice = italianVoice;
 
     utterance.onstart = () => {
         isSpeaking = true;
         setStatus('speaking', 'Sta parlando...');
-        holoCircle.classList.add('speaking');
-        holoCircle.classList.remove('active');
+        setOrbState('speaking');
     };
 
     utterance.onend = () => {
         isSpeaking = false;
         setStatus('idle', 'In attesa');
-        holoCircle.classList.remove('speaking');
+        setOrbState('idle');
         listeningText.textContent = 'Tocca il microfono e parla';
     };
 
     utterance.onerror = () => {
         isSpeaking = false;
         setStatus('idle', 'In attesa');
-        holoCircle.classList.remove('speaking');
+        setOrbState('idle');
     };
 
     if (voices.length === 0) {
@@ -105,7 +239,7 @@ function initRecognition() {
     recog.onstart = () => {
         isListening = true;
         setStatus('listening', 'Ti ascolto...');
-        holoCircle.classList.add('active');
+        setOrbState('listening');
         micBtn.classList.add('listening');
         listeningText.textContent = 'Ti sto ascoltando...';
     };
@@ -155,7 +289,7 @@ function startListening() {
 function stopListening() {
     isListening = false;
     setStatus('idle', 'In attesa');
-    holoCircle.classList.remove('active');
+    setOrbState('idle');
     micBtn.classList.remove('listening');
     listeningText.textContent = 'Tocca il microfono e parla';
 }
@@ -206,7 +340,6 @@ function processCommand(command) {
     let response = '';
 
     // === SCRIVI SU NOTE ===
-    // Accetta: "scrivi su note: ...", "scrivimi su note ...", "nota: ...", "scrivi una nota: ..."
     const notePatterns = [
         /^(?:scrivi\s+(?:su\s+)?note?|scrivimi\s+(?:su\s+)?note?|nota|crea\s+(?:una\s+)?nota)\s*[:\-]?\s*(.+)/i,
         /^(?:scrivi\s+(?:su\s+)?note?|scrivimi\s+(?:su\s+)?note?)\s+(.+)/i
@@ -221,13 +354,11 @@ function processCommand(command) {
         }
     }
 
-    // Fallback: se inizia con "scrivi su note" anche senza due punti
     if (!noteContent && /^(scrivi\s+su\s+note|scrivimi\s+su\s+note|scrivi\s+una\s+nota)/i.test(cmd)) {
         const parts = command.split(/:/);
         if (parts.length > 1) {
             noteContent = parts.slice(1).join(':').trim();
         } else {
-            // Prende tutto dopo le parole chiave
             noteContent = command.replace(/^(scrivi\s+su\s+note|scrivimi\s+su\s+note|scrivi\s+una\s+nota)\s*/i, '').trim();
         }
     }
@@ -292,7 +423,6 @@ function processCommand(command) {
 
 // ---------- Eventi ----------
 micBtn.addEventListener('click', () => {
-    // Prima interazione: saluta (necessario su iPhone)
     if (!hasGreeted) {
         hasGreeted = true;
         const greeting = 'Sistema avviato. Pronto ad assisterti, signore.';
@@ -312,9 +442,7 @@ micBtn.addEventListener('click', () => {
 sendBtn.addEventListener('click', () => {
     const text = textInput.value.trim();
     if (text) {
-        if (!hasGreeted) {
-            hasGreeted = true;
-        }
+        if (!hasGreeted) hasGreeted = true;
         addMessage(text, 'user');
         processCommand(text);
         textInput.value = '';
@@ -322,15 +450,11 @@ sendBtn.addEventListener('click', () => {
 });
 
 textInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-        sendBtn.click();
-    }
+    if (e.key === 'Enter') sendBtn.click();
 });
 
 // Preload voices
 if (window.speechSynthesis) {
     speechSynthesis.getVoices();
-    speechSynthesis.onvoiceschanged = () => {
-        speechSynthesis.getVoices();
-    };
+    speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
 }

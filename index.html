@@ -33,21 +33,10 @@
 
         <!-- Main Interface -->
         <main class="main">
-            <!-- Holographic Circle -->
+            <!-- Holographic Particle Sphere -->
             <div class="holo-container">
                 <div class="holo-circle" id="holoCircle">
-                    <div class="holo-inner">
-                        <div class="wave" id="wave"></div>
-                        <div class="wave wave-2"></div>
-                        <div class="wave wave-3"></div>
-                        <div class="center-icon">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
-                                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-                                <line x1="12" y1="19" x2="12" y2="22"/>
-                            </svg>
-                        </div>
-                    </div>
+                    <canvas id="orbCanvas" width="280" height="280"></canvas>
                 </div>
                 <p class="listening-text" id="listeningText">Tocca il microfono e parla</p>
             </div>
