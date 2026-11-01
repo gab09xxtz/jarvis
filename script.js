@@ -72,7 +72,7 @@ function drawOrb() {
     ctx.clearRect(0, 0, w, h);
 
     const glow = ctx.createRadialGradient(cx, cy, radius * 0.3, cx, cy, radius * 1.6);
-    glow.add.addColorStop(0, `rgba(0, 240, 255, ${0.08 * intensity})`);
+    glow.addColorStop(0, `rgba(0, 240, 255, ${0.08 * intensity})`);
     glow.addColorStop(0.5, `rgba(0, 200, 255, ${0.04 * intensity})`);
     glow.addColorStop(1, 'transparent');
     ctx.fillStyle = glow;
