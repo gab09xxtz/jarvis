@@ -21,7 +21,7 @@ let hasGreeted = false;
 
 // ========== GEMINI API ==========
 // INCOLLA QUI LA TUA API KEY DI GEMINI (tra gli apici)
-const GEMINI_API_KEY = 'INSERISCI_QUI_LA_TUA_API_KEY';
+const GEMINI_API_KEY = 'AQ.Ab8RN6LbhXjH1O5qDA-ghhhVLM1lwCzP0vc-EEpyh2fZuI0eWQ';
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
 
 // ---------- Simulated Home State ----------
