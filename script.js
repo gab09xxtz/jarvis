@@ -1,6 +1,6 @@
 // =====================
 // JARVIS - Voice Interface
-// Particle Orb + Note feature
+// Particle Orb + Note + Home Automation commands
 // =====================
 
 const micBtn = document.getElementById('micBtn');
@@ -19,22 +19,39 @@ let isSpeaking = false;
 let recognition = null;
 let hasGreeted = false;
 
+// ---------- Simulated Home State ----------
+const home = {
+    lights: {
+        soggiorno: false,
+        cucina: false,
+        camera: false,
+        bagno: false,
+        corridoio: false,
+        tutte: false
+    },
+    temperatura: 21,
+    volume: 40,
+    tv: false,
+    musica: false,
+    sveglia: null,
+    timer: null,
+    listaSpesa: []
+};
+
 // ---------- Particle Orb ----------
 const PARTICLE_COUNT = 900;
 let particles = [];
 let rotation = 0;
-let rotationSpeed = 0.004; // idle speed
+let rotationSpeed = 0.004;
 let targetSpeed = 0.004;
 let pulse = 0;
-let intensity = 1; // 1 = idle, higher when active
+let intensity = 1;
 
 function initParticles() {
     particles = [];
     for (let i = 0; i < PARTICLE_COUNT; i++) {
-        // Fibonacci sphere distribution for even coverage
         const phi = Math.acos(1 - 2 * (i + 0.5) / PARTICLE_COUNT);
         const theta = Math.PI * (1 + Math.sqrt(5)) * i;
-
         particles.push({
             x: Math.sin(phi) * Math.cos(theta),
             y: Math.sin(phi) * Math.sin(theta),
@@ -54,9 +71,8 @@ function drawOrb() {
 
     ctx.clearRect(0, 0, w, h);
 
-    // Soft outer glow
     const glow = ctx.createRadialGradient(cx, cy, radius * 0.3, cx, cy, radius * 1.6);
-    glow.addColorStop(0, `rgba(0, 240, 255, ${0.08 * intensity})`);
+    glow.add.addColorStop(0, `rgba(0, 240, 255, ${0.08 * intensity})`);
     glow.addColorStop(0.5, `rgba(0, 200, 255, ${0.04 * intensity})`);
     glow.addColorStop(1, 'transparent');
     ctx.fillStyle = glow;
@@ -64,30 +80,28 @@ function drawOrb() {
     ctx.arc(cx, cy, radius * 1.6, 0, Math.PI * 2);
     ctx.fill();
 
-    // Sort particles by depth (simple painter's algorithm)
     const projected = particles.map(p => {
-        // Rotate around Y axis
         const cosY = Math.cos(rotation);
         const sinY = Math.sin(rotation);
         let x = p.x * cosY - p.z * sinY;
         let z = p.x * sinY + p.z * cosY;
 
-        // Slight X tilt for more interesting movement
         const tilt = 0.35;
         const cosX = Math.cos(tilt);
         const sinX = Math.sin(tilt);
         let y = p.y * cosX - z * sinX;
         z = p.y * sinX + z * cosX;
 
-        // Breathing / pulse effect
         const breathe = 1 + Math.sin(pulse + p.offset) * 0.04 * intensity;
         const scale = radius * breathe;
 
-        const px = cx + x * scale;
-        const py = cy + y * scale;
-        const depth = (z + 1.2) / 2.2; // 0..1 roughly
-
-        return { px, py, depth, size: p.baseSize, offset: p.offset };
+        return {
+            px: cx + x * scale,
+            py: cy + y * scale,
+            depth: (z + 1.2) / 2.2,
+            size: p.baseSize,
+            offset: p.offset
+        };
     });
 
     projected.sort((a, b) => a.depth - b.depth);
@@ -96,26 +110,15 @@ function drawOrb() {
         const alpha = 0.25 + p.depth * 0.75;
         const size = p.size * (0.6 + p.depth * 0.9) * (0.9 + intensity * 0.15);
 
-        // Color shifts slightly when active
         let r = 0, g = 220, b = 255;
-        if (intensity > 1.3) {
-            // greener when listening
-            g = 255;
-            b = 180;
-        }
-        if (intensity > 1.8) {
-            // brighter cyan when speaking
-            r = 0;
-            g = 255;
-            b = 230;
-        }
+        if (intensity > 1.3) { g = 255; b = 180; }
+        if (intensity > 1.8) { r = 0; g = 255; b = 230; }
 
         ctx.beginPath();
         ctx.arc(p.px, p.py, size, 0, Math.PI * 2);
         ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha * 0.9})`;
         ctx.fill();
 
-        // Small bright core
         if (p.depth > 0.6) {
             ctx.beginPath();
             ctx.arc(p.px, p.py, size * 0.35, 0, Math.PI * 2);
@@ -124,7 +127,6 @@ function drawOrb() {
         }
     }
 
-    // Update animation state
     rotationSpeed += (targetSpeed - rotationSpeed) * 0.08;
     rotation += rotationSpeed;
     pulse += 0.03 * intensity;
@@ -150,7 +152,6 @@ function setOrbState(state) {
     }
 }
 
-// Init orb
 initParticles();
 drawOrb();
 
@@ -170,10 +171,7 @@ createParticles();
 
 // ---------- Speech Synthesis ----------
 function speak(text) {
-    if (!window.speechSynthesis) {
-        console.warn('Speech Synthesis non supportato');
-        return;
-    }
+    if (!window.speechSynthesis) return;
 
     window.speechSynthesis.cancel();
 
@@ -263,9 +261,7 @@ function initRecognition() {
         }
     };
 
-    recog.onend = () => {
-        stopListening();
-    };
+    recog.onend = () => stopListening();
 
     return recog;
 }
@@ -278,11 +274,7 @@ function startListening() {
         isSpeaking = false;
     }
     if (recognition && !isListening) {
-        try {
-            recognition.start();
-        } catch (e) {
-            console.error(e);
-        }
+        try { recognition.start(); } catch (e) { console.error(e); }
     }
 }
 
@@ -311,7 +303,7 @@ function addMessage(text, sender) {
     chatLog.scrollTop = chatLog.scrollHeight;
 }
 
-// ---------- Funzione Note (download) ----------
+// ---------- Note download ----------
 function createAndDownloadNote(content) {
     const now = new Date();
     const pad = (n) => String(n).padStart(2, '0');
@@ -334,12 +326,35 @@ function createAndDownloadNote(content) {
     return filename;
 }
 
-// ---------- Logica comandi ----------
+// ---------- Helpers for home commands ----------
+function matchRoom(cmd) {
+    if (/soggiorno|salotto|living/.test(cmd)) return 'soggiorno';
+    if (/cucina|kitchen/.test(cmd)) return 'cucina';
+    if (/camera|camera da letto|bedroom/.test(cmd)) return 'camera';
+    if (/bagno|bathroom/.test(cmd)) return 'bagno';
+    if (/corridoio|ingresso|hall/.test(cmd)) return 'corridoio';
+    if (/tutte|tutto|ovunque|casa/.test(cmd)) return 'tutte';
+    return null;
+}
+
+function setLight(room, on) {
+    if (room === 'tutte') {
+        Object.keys(home.lights).forEach(k => home.lights[k] = on);
+        return on ? 'Ho acceso tutte le luci della casa.' : 'Ho spento tutte le luci della casa.';
+    }
+    if (home.lights.hasOwnProperty(room)) {
+        home.lights[room] = on;
+        return on ? `Luci del ${room} accese.` : `Luci del ${room} spente.`;
+    }
+    return null;
+}
+
+// ---------- Main command processor ----------
 function processCommand(command) {
     const cmd = command.toLowerCase().trim();
     let response = '';
 
-    // === SCRIVI SU NOTE ===
+    // ========== NOTE ==========
     const notePatterns = [
         /^(?:scrivi\s+(?:su\s+)?note?|scrivimi\s+(?:su\s+)?note?|nota|crea\s+(?:una\s+)?nota)\s*[:\-]?\s*(.+)/i,
         /^(?:scrivi\s+(?:su\s+)?note?|scrivimi\s+(?:su\s+)?note?)\s+(.+)/i
@@ -356,11 +371,9 @@ function processCommand(command) {
 
     if (!noteContent && /^(scrivi\s+su\s+note|scrivimi\s+su\s+note|scrivi\s+una\s+nota)/i.test(cmd)) {
         const parts = command.split(/:/);
-        if (parts.length > 1) {
-            noteContent = parts.slice(1).join(':').trim();
-        } else {
-            noteContent = command.replace(/^(scrivi\s+su\s+note|scrivimi\s+su\s+note|scrivi\s+una\s+nota)\s*/i, '').trim();
-        }
+        noteContent = parts.length > 1
+            ? parts.slice(1).join(':').trim()
+            : command.replace(/^(scrivi\s+su\s+note|scrivimi\s+su\s+note|scrivi\s+una\s+nota)\s*/i, '').trim();
     }
 
     if (noteContent && noteContent.length > 0) {
@@ -368,19 +381,175 @@ function processCommand(command) {
             const filename = createAndDownloadNote(noteContent);
             response = `Nota salvata e pronta per il download: ${filename}`;
         } catch (err) {
-            console.error(err);
             response = 'Si è verificato un errore durante la creazione della nota.';
         }
-
-        setTimeout(() => {
-            addMessage(response, 'jarvis');
-            speak(response);
-        }, 300);
+        reply(response);
         return;
     }
 
-    // === Altri comandi base ===
-    if (/(ciao|salve|buongiorno|buonasera|ehi|hey)/.test(cmd)) {
+    // ========== LUCI ==========
+    if (/(accendi|attiva|apri).*(luce|luci|illuminazione)/.test(cmd) || /(luce|luci).*(accendi|attiva)/.test(cmd)) {
+        const room = matchRoom(cmd) || 'tutte';
+        response = setLight(room, true) || 'Non ho riconosciuto la stanza. Prova con soggiorno, cucina, camera, bagno o tutte.';
+    }
+    else if (/(spegni|disattiva|chiudi).*(luce|luci|illuminazione)/.test(cmd) || /(luce|luci).*(spegni|disattiva)/.test(cmd)) {
+        const room = matchRoom(cmd) || 'tutte';
+        response = setLight(room, false) || 'Non ho riconosciuto la stanza.';
+    }
+    else if (/(stato|come sono|sono accese).*(luce|luci)/.test(cmd) || /luci accese/.test(cmd)) {
+        const accese = Object.entries(home.lights)
+            .filter(([k, v]) => v && k !== 'tutte')
+            .map(([k]) => k);
+        response = accese.length
+            ? `Al momento sono accese le luci di: ${accese.join(', ')}.`
+            : 'Tutte le luci sono spente.';
+    }
+
+    // ========== TEMPERATURA / CLIMA ==========
+    else if (/(imposta|metti|imposta a|porta a|imposta la temperatura).*(\d+)/.test(cmd) || /temperatura.*(a\s+)?(\d+)/.test(cmd)) {
+        const match = cmd.match(/(\d{1,2})/);
+        if (match) {
+            const temp = parseInt(match[1]);
+            if (temp >= 16 && temp <= 30) {
+                home.temperatura = temp;
+                response = `Temperatura impostata a ${temp} gradi.`;
+            } else {
+                response = 'Posso impostare la temperatura solo tra 16 e 30 gradi.';
+            }
+        }
+    }
+    else if (/(aumenta|alza|più caldo).*(temperatura|clima|riscaldamento)/.test(cmd) || /(temperatura|riscaldamento).*(aumenta|alza)/.test(cmd)) {
+        home.temperatura = Math.min(30, home.temperatura + 1);
+        response = `Temperatura portata a ${home.temperatura} gradi.`;
+    }
+    else if (/(diminuisci|abbassa|più freddo).*(temperatura|clima|riscaldamento)/.test(cmd) || /(temperatura|riscaldamento).*(diminuisci|abbassa)/.test(cmd)) {
+        home.temperatura = Math.max(16, home.temperatura - 1);
+        response = `Temperatura portata a ${home.temperatura} gradi.`;
+    }
+    else if (/(che temperatura|quanta temperatura|temperatura attuale|a quanti gradi)/.test(cmd)) {
+        response = `La temperatura è impostata a ${home.temperatura} gradi.`;
+    }
+
+    // ========== TV ==========
+    else if (/(accendi|apri).*(tv|televisione|tele)/.test(cmd) || /(tv|televisione).*(accendi|apri)/.test(cmd)) {
+        home.tv = true;
+        response = 'Televisione accesa.';
+    }
+    else if (/(spegni|chiudi).*(tv|televisione|tele)/.test(cmd) || /(tv|televisione).*(spegni|chiudi)/.test(cmd)) {
+        home.tv = false;
+        response = 'Televisione spenta.';
+    }
+
+    // ========== MUSICA / VOLUME ==========
+    else if (/(metti|avvia|accendi|riproduci).*(musica|canzone|spotify|playlist)/.test(cmd)) {
+        home.musica = true;
+        response = 'Musica avviata.';
+    }
+    else if (/(ferma|stop|spegni|pausa).*(musica|canzone)/.test(cmd)) {
+        home.musica = false;
+        response = 'Musica fermata.';
+    }
+    else if (/(alza|aumenta).*(volume)/.test(cmd) || /volume.*(più|alza|aumenta)/.test(cmd)) {
+        home.volume = Math.min(100, home.volume + 10);
+        response = `Volume impostato a ${home.volume}%.`;
+    }
+    else if (/(abbassa|diminuisci).*(volume)/.test(cmd) || /volume.*(meno|abbassa|diminuisci)/.test(cmd)) {
+        home.volume = Math.max(0, home.volume - 10);
+        response = `Volume impostato a ${home.volume}%.`;
+    }
+    else if (/(volume a|imposta volume|volume al)\s*(\d+)/.test(cmd)) {
+        const match = cmd.match(/(\d{1,3})/);
+        if (match) {
+            home.volume = Math.min(100, Math.max(0, parseInt(match[1])));
+            response = `Volume impostato a ${home.volume}%.`;
+        }
+    }
+    else if (/muto|silenzia|togli audio/.test(cmd)) {
+        home.volume = 0;
+        response = 'Audio disattivato.';
+    }
+
+    // ========== TIMER ==========
+    else if (/(timer|conta|conta alla rovescia|impostami un timer).*(?:di\s+)?(\d+)\s*(minuti|minuto|secondi|secondo)?/.test(cmd) || /(?:tra|fra)\s+(\d+)\s*(minuti|minuto)/.test(cmd)) {
+        const match = cmd.match(/(\d+)\s*(minuti|minuto|secondi|secondo)?/);
+        if (match) {
+            let seconds = parseInt(match[1]);
+            const unit = match[2] || 'minuti';
+            if (unit.startsWith('minut')) seconds *= 60;
+
+            if (home.timer) clearTimeout(home.timer);
+
+            response = `Timer impostato per ${match[1]} ${unit}. Ti avviso quando scade.`;
+
+            home.timer = setTimeout(() => {
+                const msg = 'Il timer è scaduto.';
+                addMessage(msg, 'jarvis');
+                speak(msg);
+                home.timer = null;
+            }, seconds * 1000);
+        }
+    }
+    else if (/(cancella|ferma|annulla).*(timer)/.test(cmd)) {
+        if (home.timer) {
+            clearTimeout(home.timer);
+            home.timer = null;
+            response = 'Timer annullato.';
+        } else {
+            response = 'Non c\'è nessun timer attivo.';
+        }
+    }
+
+    // ========== LISTA SPESA ==========
+    else if (/(aggiungi|metti).*(lista|spesa|shopping)\s+(.+)/.test(cmd) || /lista spesa\s*[:\-]\s*(.+)/.test(cmd)) {
+        let item = cmd.replace(/(aggiungi|metti)\s+(alla\s+)?(lista|spesa|shopping)\s*/i, '')
+                      .replace(/lista spesa\s*[:\-]\s*/i, '')
+                      .trim();
+        if (item) {
+            home.listaSpesa.push(item);
+            response = `Ho aggiunto "${item}" alla lista della spesa.`;
+        }
+    }
+    else if (/(cosa c'è|mostrami|dimmi|leggi).*(lista|spesa)/.test(cmd) || /lista della spesa/.test(cmd)) {
+        response = home.listaSpesa.length
+            ? `Nella lista della spesa ci sono: ${home.listaSpesa.join(', ')}.`
+            : 'La lista della spesa è vuota.';
+    }
+    else if (/(svuota|cancella|elimina).*(lista|spesa)/.test(cmd)) {
+        home.listaSpesa = [];
+        response = 'Lista della spesa svuotata.';
+    }
+
+    // ========== ROUTINE ==========
+    else if (/(buongiorno|giornata|sveglia|routine mattina|modalità giorno)/.test(cmd) && !/(che ora|che giorno)/.test(cmd)) {
+        setLight('tutte', false);
+        setLight('soggiorno', true);
+        setLight('cucina', true);
+        home.temperatura = 21;
+        response = 'Buongiorno. Ho acceso le luci del soggiorno e della cucina, e impostato la temperatura a 21 gradi. Buona giornata.';
+    }
+    else if (/(buonanotte|vanno a dormire|modalità notte|routine sera|spengi tutto)/.test(cmd)) {
+        setLight('tutte', false);
+        home.tv = false;
+        home.musica = false;
+        home.temperatura = 19;
+        response = 'Buonanotte. Ho spento tutte le luci, la TV e la musica. Temperatura impostata a 19 gradi. Riposi bene.';
+    }
+    else if (/(cinema|film|modalità cinema)/.test(cmd)) {
+        setLight('tutte', false);
+        setLight('soggiorno', true);
+        home.tv = true;
+        home.volume = 30;
+        response = 'Modalità cinema attivata. Luci abbassate, TV accesa e volume impostato.';
+    }
+    else if (/(esci|esco di casa|via di casa|modalità fuori)/.test(cmd)) {
+        setLight('tutte', false);
+        home.tv = false;
+        home.musica = false;
+        response = 'Modalità fuori casa attivata. Ho spento luci, TV e musica. Buona uscita.';
+    }
+
+    // ========== INFO BASE ==========
+    else if (/(ciao|salve|buongiorno|buonasera|ehi|hey)/.test(cmd) && !/(routine|modalità)/.test(cmd)) {
         const hour = new Date().getHours();
         if (hour < 12) response = 'Buongiorno, signore. Come posso assisterla oggi?';
         else if (hour < 18) response = 'Buon pomeriggio. Sono a sua disposizione.';
@@ -388,40 +557,46 @@ function processCommand(command) {
     }
     else if (/(che ora|che ore|ora attuale|dimmi l'ora|che ora è)/.test(cmd)) {
         const now = new Date();
-        const time = now.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
-        response = `Sono le ${time}.`;
+        response = `Sono le ${now.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}.`;
     }
     else if (/(che giorno|che data|data di oggi|che giorno è)/.test(cmd)) {
         const now = new Date();
-        const date = now.toLocaleDateString('it-IT', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-        response = `Oggi è ${date}.`;
+        response = `Oggi è ${now.toLocaleDateString('it-IT', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}.`;
     }
     else if (/(come stai|come va|tutto bene)/.test(cmd)) {
         response = 'Tutti i sistemi funzionano a regime ottimale. Grazie per aver chiesto.';
     }
     else if (/(chi sei|presentati|cosa sei)/.test(cmd)) {
-        response = 'Sono J.A.R.V.I.S., Just A Rather Very Intelligent System. Il suo assistente personale.';
+        response = 'Sono J.A.R.V.I.S., Just A Rather Very Intelligent System. Il suo assistente personale per la casa.';
     }
     else if (/(grazie|ti ringrazio|thanks)/.test(cmd)) {
         response = 'Di nulla, signore. Sono qui per questo.';
     }
-    else if (/(aiuto|cosa puoi fare|comandi|help)/.test(cmd)) {
-        response = 'Posso dirti l\'ora e la data, risponderti ai saluti e creare note. Per salvare una nota di\': "scrivi su note: il testo che vuoi". La nota verrà scaricata automaticamente.';
-    }
     else if (/(tony stark|iron man|stark)/.test(cmd)) {
         response = 'Il signor Stark non è disponibile al momento. Posso aiutarla io nel frattempo?';
     }
-    else {
-        response = 'Ho ricevuto il suo messaggio. Sto ancora imparando. Presto potrò fare molto di più.';
+
+    // ========== AIUTO ==========
+    else if (/(aiuto|cosa puoi fare|comandi|help|lista comandi)/.test(cmd)) {
+        response = 'Posso gestire luci (accendi/spegni soggiorno, cucina, camera, bagno o tutte), temperatura, TV, musica e volume, timer, lista della spesa, note e routine (buongiorno, buonanotte, cinema, fuori casa). Dimmi pure cosa ti serve.';
     }
 
-    setTimeout(() => {
-        addMessage(response, 'jarvis');
-        speak(response);
-    }, 300);
+    // ========== FALLBACK ==========
+    else {
+        response = 'Non ho ancora collegato questo comando ai dispositivi reali. Per ora posso gestire luci, clima, TV, musica, timer, lista spesa e note. Prova a dirmi "aiuto" per vedere tutti i comandi.';
+    }
+
+    reply(response);
 }
 
-// ---------- Eventi ----------
+function reply(text) {
+    setTimeout(() => {
+        addMessage(text, 'jarvis');
+        speak(text);
+    }, 280);
+}
+
+// ---------- Events ----------
 micBtn.addEventListener('click', () => {
     if (!hasGreeted) {
         hasGreeted = true;
@@ -453,7 +628,6 @@ textInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') sendBtn.click();
 });
 
-// Preload voices
 if (window.speechSynthesis) {
     speechSynthesis.getVoices();
     speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
