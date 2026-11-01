@@ -1,6 +1,6 @@
 // =====================
 // JARVIS - Voice Interface
-// Particle Orb + Notes + Home Automation + Gemini AI
+// Particle Orb + Notes + Home Automation + Gemini AI (via Cloudflare Worker)
 // =====================
 
 const micBtn = document.getElementById('micBtn');
@@ -19,10 +19,8 @@ let isSpeaking = false;
 let recognition = null;
 let hasGreeted = false;
 
-// ========== GEMINI API ==========
-// INCOLLA QUI LA TUA API KEY DI GEMINI (tra gli apici)
-const GEMINI_API_KEY = 'AQ.Ab8RN6LbhXjH1O5qDA-ghhhVLM1lwCzP0vc-EEpyh2fZuI0eWQ';
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
+// ========== GEMINI via Cloudflare Worker (sicuro) ==========
+const WORKER_URL = 'https://jarvis-gemini.gfurceri9.workers.dev';
 
 // ---------- Simulated Home State ----------
 const home = {
@@ -244,7 +242,7 @@ function initRecognition() {
         setOrbState('listening');
         micBtn.classList.add('listening');
         listeningText.textContent = 'Ti sto ascoltando...';
-    };
+    }
 
     recog.onresult = (event) => {
         const transcript = event.results[0][0].transcript.trim();
@@ -336,12 +334,8 @@ function createAndDownloadNote(content) {
     return filename;
 }
 
-// ---------- Gemini AI ----------
+// ---------- Gemini AI via Cloudflare Worker ----------
 async function askGemini(userMessage) {
-    if (!GEMINI_API_KEY || GEMINI_API_KEY === 'INSERISCI_QUI_LA_TUA_API_KEY') {
-        return 'API Key di Gemini non configurata. Apri il file script.js e inserisci la tua chiave.';
-    }
-
     const systemPrompt = `Sei J.A.R.V.I.S., l'assistente personale intelligente ispirato a Iron Man.
 Rispondi sempre in italiano, in modo cortese, preciso e un po' formale (usa "signore" quando appropriato).
 Risposte brevi e chiare, ideali per essere lette ad alta voce (massimo 2-3 frasi).
@@ -351,7 +345,7 @@ Puoi aiutare con domande generali, curiosità, consigli, calcoli semplici, tradu
         setStatus('speaking', 'Sto pensando...');
         setOrbState('speaking');
 
-        const res = await fetch(GEMINI_URL, {
+        const res = await fetch(WORKER_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -367,11 +361,17 @@ Puoi aiutare con domande generali, curiosità, consigli, calcoli semplici, tradu
         });
 
         if (!res.ok) {
-            console.error('Gemini error:', await res.text());
+            console.error('Worker error:', await res.text());
             return 'Mi dispiace, al momento non riesco a contattare i sistemi avanzati.';
         }
 
         const data = await res.json();
+
+        if (data.error) {
+            console.error('Gemini error via worker:', data.error);
+            return 'Si è verificato un problema con i sistemi AI.';
+        }
+
         const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
         return text ? text.trim() : 'Non ho ricevuto una risposta valida.';
     } catch (e) {
@@ -644,7 +644,7 @@ async function processCommand(command) {
         response = 'Posso gestire luci, temperatura, TV, musica, volume, timer, lista spesa, promemoria, note e routine. Inoltre ora posso rispondere a domande generali grazie all\'intelligenza artificiale. Provi pure a chiedermi qualsiasi cosa.';
     }
 
-    // ===== FALLBACK → GEMINI =====
+    // ===== FALLBACK → GEMINI via Worker =====
     else {
         handled = false;
         response = await askGemini(command);
@@ -677,7 +677,7 @@ micBtn.addEventListener('click', () => {
 });
 
 sendBtn.addEventListener('click', () => {
-    const text = textInput.value.trim();
+    const text = textInput.value.trim.trim();
     if (text) {
         if (!hasGreeted) hasGreeted = true;
         addMessage(text, 'user');
