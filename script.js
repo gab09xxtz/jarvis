@@ -17,20 +17,26 @@ let recognition = null;
 let hasGreeted = false;
 let intensity = 1;
 
-const WORKER_URL = 'https://jarvis-gemini.gfurceri9.workers.dev';
+const WORKER_URL = 'https://frosty-waterfall-d1b0.gfurceri9.workers.dev';
+const WORKER_TTS_ENDPOINTS = [
+    WORKER_URL.replace(/\/$/, ''),
+    `${WORKER_URL.replace(/\/$/, '')}/tts`,
+    `${WORKER_URL.replace(/\/$/, '')}/api/tts`
+];
 
 const VOICE_CONFIG = {
     preferredLanguage: 'it-IT',
     rate: 0.82,
     pitch: 0.72,
     volume: 1,
-    useExternalFallback: false,
-    externalTtsUrl: '',
-    voiceHints: ['google italiano', 'italiano', 'luca', 'paolo', 'giorgio', 'male', 'uomo', 'enrico', 'daniele']
+    useExternalFallback: true,
+    externalTtsUrl: WORKER_URL,
+    voiceHints: ['google italiano', 'italiano', 'luca', 'paolo', 'giorgio', 'enrico', 'daniele']
 };
 
 const speechQueue = [];
 let speechSequence = 0;
+let activeAudio = null;
 
 const home = {
     lights: { soggiorno: false, cucina: false, camera: false, bagno: false, corridoio: false, tutte: false },
@@ -205,43 +211,162 @@ function buildSpeechUtterance(text, options = {}) {
     return utterance;
 }
 
-function flushSpeechQueue() {
-    if (!speechQueue.length) return;
-    if (window.speechSynthesis && (speechSynthesis.speaking || speechSynthesis.pending)) return;
+function stopActiveAudio() {
+    if (activeAudio) {
+        try { activeAudio.pause(); } catch (e) {}
+        activeAudio.src = '';
+        activeAudio = null;
+    }
+}
 
-    const next = speechQueue.shift();
-    if (!next) return;
+function finishSpeech() {
+    isSpeaking = false;
+    setStatus('idle', 'SISTEMI IN ATTESA');
+    setNetworkState('idle');
+    if (listeningText) listeningText.textContent = 'Tocca il microfono e parla';
+    processSpeechQueue();
+}
 
-    const utterance = buildSpeechUtterance(next.text, next.options || {});
+async function fetchVoiceFromWorker(text, options = {}) {
+    const payload = {
+        text: String(text || '').trim(),
+        voice: options.voice || 'jarvis',
+        language: options.lang || VOICE_CONFIG.preferredLanguage,
+        model_id: options.model || 'eleven_multilingual_v2'
+    };
 
+    let lastError = null;
+
+    for (const endpoint of WORKER_TTS_ENDPOINTS) {
+        try {
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                lastError = new Error(`TTS worker returned ${response.status}`);
+                continue;
+            }
+
+            const contentType = (response.headers.get('content-type') || '').toLowerCase();
+
+            if (contentType.includes('audio') || contentType.includes('mpeg') || contentType.includes('wav') || contentType.includes('octet-stream')) {
+                return { type: 'blob', blob: await response.blob() };
+            }
+
+            const json = await response.json().catch(() => null);
+            if (json && json.audioUrl) return { type: 'url', url: json.audioUrl };
+            if (json && json.url) return { type: 'url', url: json.url };
+            if (json && json.data) {
+                if (typeof json.data === 'string' && json.data.startsWith('data:')) {
+                    return { type: 'data-url', url: json.data };
+                }
+                if (typeof json.data === 'string' && /^https?:\//.test(json.data)) {
+                    return { type: 'url', url: json.data };
+                }
+            }
+            if (json && json.error) {
+                lastError = new Error(json.error);
+                continue;
+            }
+        } catch (error) {
+            lastError = error;
+        }
+    }
+
+    throw lastError || new Error('TTS worker unavailable');
+}
+
+function playAudioResult(result) {
+    return new Promise((resolve, reject) => {
+        let sourceUrl = '';
+
+        if (result.type === 'blob') {
+            sourceUrl = URL.createObjectURL(result.blob);
+        } else if (result.type === 'url') {
+            sourceUrl = result.url;
+        } else if (result.type === 'data-url') {
+            sourceUrl = result.url;
+        } else {
+            reject(new Error('No audio content available'));
+            return;
+        }
+
+        const audio = new Audio(sourceUrl);
+        activeAudio = audio;
+        audio.volume = 1;
+        audio.preload = 'auto';
+
+        audio.onended = () => {
+            try { if (sourceUrl.startsWith('blob:')) URL.revokeObjectURL(sourceUrl); } catch (e) {}
+            activeAudio = null;
+            resolve();
+        };
+
+        audio.onerror = () => {
+            try { if (sourceUrl.startsWith('blob:')) URL.revokeObjectURL(sourceUrl); } catch (e) {}
+            activeAudio = null;
+            reject(new Error('Audio playback error'));
+        };
+
+        audio.play().then(() => {
+            // keep playback chain active until onended fires
+        }).catch((error) => {
+            try { if (sourceUrl.startsWith('blob:')) URL.revokeObjectURL(sourceUrl); } catch (e) {}
+            activeAudio = null;
+            reject(error);
+        });
+    });
+}
+
+function fallbackSpeechSynthesis(text, options = {}) {
+    if (!window.speechSynthesis) {
+        finishSpeech();
+        return;
+    }
+
+    const utterance = buildSpeechUtterance(text, options);
     utterance.onstart = () => {
         isSpeaking = true;
         setStatus('speaking', 'ELABORAZIONE VOCALE');
         setNetworkState('speaking');
     };
+    utterance.onend = () => finishSpeech();
+    utterance.onerror = () => finishSpeech();
+    speechSynthesis.speak(utterance);
+}
 
-    utterance.onend = () => {
-        isSpeaking = false;
-        setStatus('idle', 'SISTEMI IN ATTESA');
-        setNetworkState('idle');
-        if (listeningText) listeningText.textContent = 'Tocca il microfono e parla';
-        flushSpeechQueue();
-    };
+async function processSpeechQueue() {
+    if (isSpeaking || !speechQueue.length) {
+        return;
+    }
 
-    utterance.onerror = (event) => {
-        isSpeaking = false;
-        setStatus('idle', 'SISTEMI IN ATTESA');
-        setNetworkState('idle');
-        console.warn('Speech error:', event.error || event);
-        flushSpeechQueue();
-    };
+    const next = speechQueue.shift();
+    if (!next) return;
 
-    window.speechSynthesis.speak(utterance);
+    isSpeaking = true;
+    setStatus('speaking', 'ELABORAZIONE VOCALE');
+    setNetworkState('speaking');
+
+    try {
+        const result = await fetchVoiceFromWorker(next.text, next.options || {});
+        await playAudioResult(result);
+        finishSpeech();
+    } catch (error) {
+        console.warn('Voice worker unavailable. Falling back to local speech synthesis.', error);
+        fallbackSpeechSynthesis(next.text, next.options || {});
+    }
 }
 
 function interruptSpeech() {
-    if (!window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
+    if (!window.speechSynthesis) {
+        // no-op fallback only
+    }
+
+    stopActiveAudio();
+    if (window.speechSynthesis) speechSynthesis.cancel();
     speechQueue.length = 0;
     isSpeaking = false;
     setStatus('idle', 'SISTEMI IN ATTESA');
@@ -251,7 +376,6 @@ function interruptSpeech() {
 
 function speak(text, options = {}) {
     if (!text || !String(text).trim()) return;
-    if (!window.speechSynthesis) return;
 
     const item = {
         id: ++speechSequence,
@@ -270,7 +394,7 @@ function speak(text, options = {}) {
     }
 
     speechQueue.push(item);
-    flushSpeechQueue();
+    processSpeechQueue();
 }
 
 function initRecognition() {
@@ -422,7 +546,7 @@ async function processCommand(command) {
             else response = 'Posso impostare solo tra 16 e 30 gradi.';
         }
     } else if (/(che temperatura|a quanti gradi)/.test(cmd)) {
-        response = 'La temperatura e impostata a ' + home.temperatura + ' gradi.';
+        response = 'La temperatura è impostata a ' + home.temperatura + ' gradi.';
     } else if (/(accendi|apri).*(tv|televisione)/.test(cmd)) { home.tv = true; response = 'Televisione accesa.'; }
     else if (/(spegni|chiudi).*(tv|televisione)/.test(cmd)) { home.tv = false; response = 'Televisione spenta.'; }
     else if (/(metti|avvia).*(musica)/.test(cmd)) { home.musica = true; response = 'Musica avviata.'; }
@@ -433,7 +557,7 @@ async function processCommand(command) {
             let sec = parseInt(m[1]) * 60;
             if (home.timer) clearTimeout(home.timer);
             response = 'Timer impostato per ' + m[1] + ' minuti.';
-            home.timer = setTimeout(() => { reply('Il timer e scaduto.'); }, sec*1000);
+            home.timer = setTimeout(() => { reply('Il timer è scaduto.'); }, sec*1000);
         }
     } else if (/(buongiorno)/.test(cmd) && !/che/.test(cmd)) {
         setLight('soggiorno', true); setLight('cucina', true); home.temperatura = 21;
