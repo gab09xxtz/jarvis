@@ -1,10 +1,10 @@
-// JARVIS Neural Interface - Clean version
+// JARVIS Neural Interface - Minimal UI
 
 const micBtn = document.getElementById('micBtn');
 const statusEl = document.getElementById('status');
 const statusText = statusEl ? statusEl.querySelector('.status-text') : null;
 const listeningText = document.getElementById('listeningText');
-const chatLog = document.getElementById('chatLog');
+const lastReplyEl = document.getElementById('lastReply');
 const textInput = document.getElementById('textInput');
 const sendBtn = document.getElementById('sendBtn');
 const neuronCountEl = document.getElementById('neuronCount');
@@ -27,7 +27,7 @@ const home = {
 // ===== Neural Network =====
 let nodes = [];
 let links = [];
-const NODE_COUNT = 100;
+const NODE_COUNT = 110;
 
 function resizeCanvas() {
     if (!canvas) return;
@@ -42,16 +42,15 @@ function initNetwork() {
     const w = canvas.width;
     const h = canvas.height;
 
-    // Create denser cluster in center
     for (let i = 0; i < NODE_COUNT; i++) {
         const angle = Math.random() * Math.PI * 2;
-        const radius = Math.random() * Math.min(w, h) * 0.38;
+        const radius = Math.random() * Math.min(w, h) * 0.4;
         nodes.push({
-            x: w / 2 + Math.cos(angle) * radius * (0.3 + Math.random() * 0.7),
-            y: h * 0.42 + Math.sin(angle) * radius * (0.3 + Math.random() * 0.7),
-            vx: (Math.random() - 0.5) * 0.5,
-            vy: (Math.random() - 0.5) * 0.5,
-            r: 1.4 + Math.random() * 2.4,
+            x: w / 2 + Math.cos(angle) * radius * (0.25 + Math.random() * 0.75),
+            y: h * 0.42 + Math.sin(angle) * radius * (0.25 + Math.random() * 0.75),
+            vx: (Math.random() - 0.5) * 0.55,
+            vy: (Math.random() - 0.5) * 0.55,
+            r: 1.3 + Math.random() * 2.6,
             pulse: Math.random() * Math.PI * 2
         });
     }
@@ -60,9 +59,7 @@ function initNetwork() {
         for (let j = i + 1; j < NODE_COUNT; j++) {
             const dx = nodes[i].x - nodes[j].x;
             const dy = nodes[i].y - nodes[j].y;
-            if (Math.sqrt(dx * dx + dy * dy) < 140) {
-                links.push({ a: i, b: j });
-            }
+            if (Math.sqrt(dx * dx + dy * dy) < 145) links.push({ a: i, b: j });
         }
     }
 }
@@ -73,23 +70,21 @@ function drawNetwork() {
     const h = canvas.height;
     ctx.clearRect(0, 0, w, h);
 
-    // Central glow
-    const g = ctx.createRadialGradient(w/2, h*0.42, 10, w/2, h*0.42, Math.min(w,h)*0.4);
-    g.addColorStop(0, `rgba(0,229,255,${0.09*intensity})`);
-    g.addColorStop(0.5, `rgba(0,180,255,${0.03*intensity})`);
+    const g = ctx.createRadialGradient(w/2, h*0.42, 10, w/2, h*0.42, Math.min(w,h)*0.42);
+    g.addColorStop(0, `rgba(0,229,255,${0.1*intensity})`);
+    g.addColorStop(0.5, `rgba(0,180,255,${0.035*intensity})`);
     g.addColorStop(1, 'transparent');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, w, h);
 
-    // Links
     for (const link of links) {
         const a = nodes[link.a];
         const b = nodes[link.b];
         const dx = a.x - b.x;
         const dy = a.y - b.y;
         const dist = Math.sqrt(dx*dx + dy*dy);
-        if (dist > 150) continue;
-        const alpha = (1 - dist/150) * 0.45 * intensity;
+        if (dist > 155) continue;
+        const alpha = (1 - dist/155) * 0.48 * intensity;
         ctx.beginPath();
         ctx.moveTo(a.x, a.y);
         ctx.lineTo(b.x, b.y);
@@ -98,33 +93,31 @@ function drawNetwork() {
         ctx.stroke();
     }
 
-    // Nodes
     for (const n of nodes) {
         n.x += n.vx * intensity;
         n.y += n.vy * intensity;
         n.pulse += 0.045 * intensity;
 
-        // Soft boundary
         const cx = w/2, cy = h*0.42;
-        const maxR = Math.min(w,h) * 0.42;
+        const maxR = Math.min(w,h) * 0.44;
         const dx = n.x - cx, dy = n.y - cy;
         const d = Math.sqrt(dx*dx + dy*dy);
         if (d > maxR) {
-            n.vx -= dx * 0.001;
-            n.vy -= dy * 0.001;
+            n.vx -= dx * 0.0012;
+            n.vy -= dy * 0.0012;
         }
 
         const glow = 0.55 + Math.sin(n.pulse) * 0.35;
-        const r = n.r * (0.9 + intensity * 0.18);
+        const r = n.r * (0.9 + intensity * 0.2);
 
         ctx.beginPath();
-        ctx.arc(n.x, n.y, r*3.5, 0, Math.PI*2);
-        ctx.fillStyle = `rgba(0,229,255,${0.09*glow*intensity})`;
+        ctx.arc(n.x, n.y, r*3.6, 0, Math.PI*2);
+        ctx.fillStyle = `rgba(0,229,255,${0.1*glow*intensity})`;
         ctx.fill();
 
         ctx.beginPath();
         ctx.arc(n.x, n.y, r, 0, Math.PI*2);
-        ctx.fillStyle = `rgba(190,250,255,${0.85+glow*0.15})`;
+        ctx.fillStyle = `rgba(195,250,255,${0.88+glow*0.12})`;
         ctx.fill();
     }
 
@@ -132,19 +125,16 @@ function drawNetwork() {
 }
 
 function setNetworkState(state) {
-    if (state === 'listening') intensity = 1.9;
-    else if (state === 'speaking') intensity = 2.4;
+    if (state === 'listening') intensity = 2.0;
+    else if (state === 'speaking') intensity = 2.5;
     else intensity = 1;
 }
 
-// Neuron counter
 setInterval(() => {
     if (!neuronCountEl) return;
-    const n = 490 + Math.floor(Math.random()*50) + Math.floor(intensity*15);
-    neuronCountEl.textContent = n + ' neuroni online';
+    neuronCountEl.textContent = (495 + Math.floor(Math.random()*55) + Math.floor(intensity*18)) + ' neuroni online';
 }, 2000);
 
-// Init
 try {
     resizeCanvas();
     initNetwork();
@@ -166,9 +156,8 @@ function speak(text) {
     u.onstart = () => { isSpeaking = true; setStatus('speaking', 'ELABORAZIONE VOCALE'); setNetworkState('speaking'); };
     u.onend = () => { isSpeaking = false; setStatus('idle', 'SISTEMI IN ATTESA'); setNetworkState('idle'); if (listeningText) listeningText.textContent = 'Tocca il microfono e parla'; };
     u.onerror = () => { isSpeaking = false; setStatus('idle', 'SISTEMI IN ATTESA'); setNetworkState('idle'); };
-    if (voices.length === 0) {
-        speechSynthesis.onvoiceschanged = () => speechSynthesis.speak(u);
-    } else speechSynthesis.speak(u);
+    if (voices.length === 0) speechSynthesis.onvoiceschanged = () => speechSynthesis.speak(u);
+    else speechSynthesis.speak(u);
 }
 
 function initRecognition() {
@@ -187,12 +176,12 @@ function initRecognition() {
     };
     r.onresult = (e) => {
         const t = e.results[0][0].transcript.trim();
-        if (t) { addMessage(t, 'user'); processCommand(t); }
+        if (t) processCommand(t);
     };
     r.onerror = (e) => {
         stopListening();
-        if (e.error === 'no-speech') addMessage('Non ho rilevato audio. Riprova.', 'jarvis');
-        if (e.error === 'not-allowed') addMessage('Autorizza il microfono per parlarmi.', 'jarvis');
+        if (e.error === 'no-speech') showReply('Non ho rilevato audio. Riprova.');
+        if (e.error === 'not-allowed') showReply('Autorizza il microfono per parlarmi.');
     };
     r.onend = () => stopListening();
     return r;
@@ -218,17 +207,19 @@ function setStatus(type, text) {
     if (statusText) statusText.textContent = text;
 }
 
-function addMessage(text, sender) {
-    if (!chatLog) return;
-    const div = document.createElement('div');
-    div.className = 'message ' + sender;
-    div.innerHTML = '<span class="msg-label">' + (sender === 'jarvis' ? 'JARVIS' : 'TU') + '</span><p>' + text + '</p>';
-    chatLog.appendChild(div);
-    chatLog.scrollTop = chatLog.scrollHeight;
+function showReply(text) {
+    if (lastReplyEl) {
+        lastReplyEl.style.opacity = '0';
+        setTimeout(() => {
+            lastReplyEl.textContent = text;
+            lastReplyEl.style.opacity = '1';
+        }, 150);
+    }
 }
 
 function reply(text) {
-    setTimeout(() => { addMessage(text, 'jarvis'); speak(text); }, 200);
+    showReply(text);
+    speak(text);
 }
 
 // ===== Gemini =====
@@ -285,7 +276,6 @@ async function processCommand(command) {
     let response = '';
     let handled = true;
 
-    // Notes
     let noteContent = null;
     const nm = command.match(/(?:scrivi\s+(?:su\s+)?note?|scrivimi\s+(?:su\s+)?note?|nota)\s*[:\-]?\s*(.+)/i);
     if (nm) noteContent = nm[1].trim();
@@ -326,7 +316,7 @@ async function processCommand(command) {
             let sec = parseInt(m[1]) * 60;
             if (home.timer) clearTimeout(home.timer);
             response = 'Timer impostato per ' + m[1] + ' minuti.';
-            home.timer = setTimeout(() => { addMessage('Il timer e scaduto.', 'jarvis'); speak('Il timer e scaduto.'); }, sec*1000);
+            home.timer = setTimeout(() => { reply('Il timer e scaduto.'); }, sec*1000);
         }
     } else if (/(buongiorno)/.test(cmd) && !/che/.test(cmd)) {
         setLight('soggiorno', true); setLight('cucina', true); home.temperatura = 21;
@@ -351,7 +341,7 @@ async function processCommand(command) {
     }
 
     if (handled) reply(response);
-    else { addMessage(response, 'jarvis'); speak(response); }
+    else { showReply(response); speak(response); }
 }
 
 // ===== Events =====
@@ -359,9 +349,7 @@ if (micBtn) {
     micBtn.addEventListener('click', () => {
         if (!hasGreeted) {
             hasGreeted = true;
-            const g = 'Sistema neurale avviato. Pronto ad assisterti, signore.';
-            addMessage(g, 'jarvis');
-            speak(g);
+            reply('Sistema neurale avviato. Pronto ad assisterti, signore.');
             return;
         }
         if (isListening) { if (recognition) recognition.stop(); stopListening(); }
@@ -374,7 +362,6 @@ if (sendBtn) {
         const text = textInput ? textInput.value.trim() : '';
         if (text) {
             if (!hasGreeted) hasGreeted = true;
-            addMessage(text, 'user');
             processCommand(text);
             if (textInput) textInput.value = '';
         }
