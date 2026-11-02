@@ -11,54 +11,65 @@
     <canvas id="networkCanvas"></canvas>
     <div class="scanlines"></div>
 
-    <div class="app-shell">
-        <aside class="hud-panel hud-left">
-            <div class="panel-header">
-                <span class="tag">NODE STATUS</span>
-                <span class="live-indicator"><span class="dot"></span> ONLINE</span>
+    <div class="app">
+        <!-- TOP: compact status strip -->
+        <header class="top-bar">
+            <div class="brand">
+                <span class="status-core" id="statusCore"></span>
+                <h1>J.A.R.V.I.S.</h1>
             </div>
-            <div class="service-grid">
-                <div class="service-item active"><span>AI CORE</span><strong id="aiStatus">READY</strong></div>
-                <div class="service-item"><span>MIC</span><strong id="micStatus">STANDBY</strong></div>
-                <div class="service-item"><span>VOICE</span><strong id="voiceStatus">READY</strong></div>
+            <div class="status-pills">
+                <div class="pill"><span>AI</span><strong id="aiStatus">READY</strong></div>
+                <div class="pill"><span>MIC</span><strong id="micStatus">STANDBY</strong></div>
+                <div class="pill"><span>VOICE</span><strong id="voiceStatus">READY</strong></div>
             </div>
-        </aside>
+            <div class="status" id="status">
+                <span class="status-text">SISTEMI IN ATTESA</span>
+            </div>
+        </header>
 
-        <main class="main-stage">
-            <header class="stage-topbar">
-                <div class="logo-blip"><div class="status-core" id="statusCore"></div><h1>J.A.R.V.I.S.</h1></div>
-                <div class="status" id="status"><span class="status-text">SISTEMI IN ATTESA</span></div>
-            </header>
-
-            <div class="brain-shell" aria-label="Nucleo neurale di Jarvis">
-                <div class="brain-glow"></div>
-                <div class="brain-pulse-ring"></div>
-                <div class="brain-visual"><div class="brain-core-3d"></div></div>
+        <!-- CENTER: visualizer + info card (no overlap) -->
+        <main class="stage">
+            <div class="viz-zone">
+                <div class="brain-shell" aria-hidden="true">
+                    <div class="brain-glow"></div>
+                    <div class="brain-pulse-ring"></div>
+                    <div class="brain-visual"><div class="brain-core-3d"></div></div>
+                </div>
             </div>
 
-            <div class="meta-panel">
+            <section class="info-card">
                 <div class="neuron-count" id="neuronCount">512 neuroni online</div>
                 <p class="listening-text" id="listeningText">Tocca il microfono e parla</p>
                 <p class="last-reply" id="lastReply">Sistema neurale avviato. Pronto ad assisterti, signore.</p>
-            </div>
+                <div class="voice-wave" aria-hidden="true">
+                    <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+                </div>
+            </section>
 
-            <div class="voice-wave" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+            <aside class="history-card" id="conversationHistoryWrap">
+                <div class="history-label">LAST EVENT</div>
+                <ul class="history-list" id="conversationHistory">
+                    <li class="system">Sistema neurale avviato.</li>
+                </ul>
+            </aside>
         </main>
 
-        <aside class="hud-panel hud-right">
-            <div class="panel-header"><span class="tag">CONVERSATION</span><span class="live-indicator subtle">LAST EVENT</span></div>
-            <ul class="history-list" id="conversationHistory"><li class="system">Sistema neurale avviato.</li></ul>
-        </aside>
-    </div>
-
-    <div class="bottom-bar">
-        <button class="mic-btn" id="micBtn" aria-label="Attiva microfono">
-            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
-        </button>
-        <div class="input-group">
-            <input type="text" id="textInput" placeholder="Scrivi un comando o una domanda..." autocomplete="off">
-            <button class="send-btn" id="sendBtn" aria-label="Invia comando"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>
-        </div>
+        <!-- BOTTOM: sticky controls above browser chrome -->
+        <footer class="bottom-bar">
+            <button class="mic-btn" id="micBtn" aria-label="Attiva microfono">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+                    <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+                </svg>
+            </button>
+            <div class="input-group">
+                <input type="text" id="textInput" placeholder="Scrivi un comando o una domanda..." autocomplete="off">
+                <button class="send-btn" id="sendBtn" aria-label="Invia">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+                </button>
+            </div>
+        </footer>
     </div>
 
     <script src="script.js"></script>
