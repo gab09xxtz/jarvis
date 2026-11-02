@@ -1,37 +1,32 @@
 // =====================
-// JARVIS - Voice Interface
-// Particle Orb + Notes + Home Automation + Gemini AI (via Cloudflare Worker)
+// JARVIS - Neural Interface
+// Rete neurale + Notes + Home Automation + Gemini (via Worker)
 // =====================
 
 const micBtn = document.getElementById('micBtn');
-const holoCircle = document.getElementById('holoCircle');
 const statusEl = document.getElementById('status');
 const statusText = statusEl.querySelector('.status-text');
+const statusCore = document.getElementById('statusCore');
 const listeningText = document.getElementById('listeningText');
 const chatLog = document.getElementById('chatLog');
 const textInput = document.getElementById('textInput');
 const sendBtn = document.getElementById('sendBtn');
-const canvas = document.getElementById('orbCanvas');
+const neuronCountEl = document.getElementById('neuronCount');
+const canvas = document.getElementById('networkCanvas');
 const ctx = canvas.getContext('2d');
 
 let isListening = false;
 let isSpeaking = false;
 let recognition = null;
 let hasGreeted = false;
+let intensity = 1; // 1 idle, higher when active
 
-// ========== GEMINI via Cloudflare Worker (sicuro) ==========
+// ========== GEMINI via Cloudflare Worker ==========
 const WORKER_URL = 'https://jarvis-gemini.gfurceri9.workers.dev';
 
-// ---------- Simulated Home State ----------
+// ---------- Home State ----------
 const home = {
-    lights: {
-        soggiorno: false,
-        cucina: false,
-        camera: false,
-        bagno: false,
-        corridoio: false,
-        tutte: false
-    },
+    lights: { soggiorno: false, cucina: false, camera: false, bagno: false, corridoio: false, tutte: false },
     temperatura: 21,
     volume: 40,
     tv: false,
@@ -41,137 +36,143 @@ const home = {
     promemoria: []
 };
 
-// ---------- Particle Orb ----------
-const PARTICLE_COUNT = 900;
-let particles = [];
-let rotation = 0;
-let rotationSpeed = 0.004;
-let targetSpeed = 0.004;
-let pulse = 0;
-let intensity = 1;
+// ---------- Neural Network Canvas ----------
+let nodes = [];
+let links = [];
+const NODE_COUNT = 90;
 
-function initParticles() {
-    particles = [];
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
-        const phi = Math.acos(1 - 2 * (i + 0.5) / PARTICLE_COUNT);
-        const theta = Math.PI * (1 + Math.sqrt(5)) * i;
-        particles.push({
-            x: Math.sin(phi) * Math.cos(theta),
-            y: Math.sin(phi) * Math.sin(theta),
-            z: Math.cos(phi),
-            baseSize: 0.8 + Math.random() * 1.4,
-            offset: Math.random() * Math.PI * 2
-        });
-    }
+function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
 }
 
-function drawOrb() {
+function initNetwork() {
+    nodes = [];
+    links = [];
     const w = canvas.width;
     const h = canvas.height;
-    const cx = w / 2;
-    const cy = h / 2;
-    const radius = Math.min(w, h) * 0.38;
 
-    ctx.clearRect(0, 0, w, h);
+    for (let i = 0; i < NODE_COUNT; i++) {
+        nodes.push({
+            x: Math.random() * w,
+            y: Math.random() * h,
+            vx: (Math.random() - 0.5) * 0.35,
+            vy: (Math.random() - 0.5) * 0.35,
+            r: 1.2 + Math.random() * 2.2,
+            pulse: Math.random() * Math.PI * 2
+        });
+    }
 
-    const glow = ctx.createRadialGradient(cx, cy, radius * 0.3, cx, cy, radius * 1.6);
-    glow.addColorStop(0, `rgba(0, 240, 255, ${0.08 * intensity})`);
-    glow.addColorStop(0.5, `rgba(0, 200, 255, ${0.04 * intensity})`);
-    glow.addColorStop(1, 'transparent');
-    ctx.fillStyle = glow;
-    ctx.beginPath();
-    ctx.arc(cx, cy, radius * 1.6, 0, Math.PI * 2);
-    ctx.fill();
-
-    const projected = particles.map(p => {
-        const cosY = Math.cos(rotation);
-        const sinY = Math.sin(rotation);
-        let x = p.x * cosY - p.z * sinY;
-        let z = p.x * sinY + p.z * cosY;
-
-        const tilt = 0.35;
-        const cosX = Math.cos(tilt);
-        const sinX = Math.sin(tilt);
-        let y = p.y * cosX - z * sinX;
-        z = p.y * sinX + z * cosX;
-
-        const breathe = 1 + Math.sin(pulse + p.offset) * 0.04 * intensity;
-        const scale = radius * breathe;
-
-        return {
-            px: cx + x * scale,
-            py: cy + y * scale,
-            depth: (z + 1.2) / 2.2,
-            size: p.baseSize
-        };
-    });
-
-    projected.sort((a, b) => a.depth - b.depth);
-
-    for (const p of projected) {
-        const alpha = 0.25 + p.depth * 0.75;
-        const size = p.size * (0.6 + p.depth * 0.9) * (0.9 + intensity * 0.15);
-
-        let r = 0, g = 220, b = 255;
-        if (intensity > 1.3) { g = 255; b = 180; }
-        if (intensity > 1.8) { r = 0; g = 255; b = 230; }
-
-        ctx.beginPath();
-        ctx.arc(p.px, p.py, size, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha * 0.9})`;
-        ctx.fill();
-
-        if (p.depth > 0.6) {
-            ctx.beginPath();
-            ctx.arc(p.px, p.py, size * 0.35, 0, Math.PI * 2);
-            ctx.fillStyle = `rgba(200, 255, 255, ${alpha * 0.7})`;
-            ctx.fill();
+    // Create links between nearby nodes
+    for (let i = 0; i < NODE_COUNT; i++) {
+        for (let j = i + 1; j < NODE_COUNT; j++) {
+            const dx = nodes[i].x - nodes[j].x;
+            const dy = nodes[i].y - nodes[j].y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < 160) {
+                links.push({ a: i, b: j, dist });
+            }
         }
     }
-
-    rotationSpeed += (targetSpeed - rotationSpeed) * 0.08;
-    rotation += rotationSpeed;
-    pulse += 0.03 * intensity;
-
-    requestAnimationFrame(drawOrb);
 }
 
-function setOrbState(state) {
+function drawNetwork() {
+    const w = canvas.width;
+    const h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    // Soft central glow
+    const cx = w / 2;
+    const cy = h * 0.38;
+    const g = ctx.createRadialGradient(cx, cy, 20, cx, cy, Math.min(w, h) * 0.45);
+    g.addColorStop(0, `rgba(0, 229, 255, ${0.06 * intensity})`);
+    g.addColorStop(0.5, `rgba(0, 180, 255, ${0.03 * intensity})`);
+    g.addColorStop(1, 'transparent');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+
+    // Links
+    for (const link of links) {
+        const a = nodes[link.a];
+        const b = nodes[link.b];
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 180) continue;
+
+        const alpha = (1 - dist / 180) * 0.35 * intensity;
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.strokeStyle = `rgba(0, 220, 255, ${alpha})`;
+        ctx.lineWidth = 0.7;
+        ctx.stroke();
+    }
+
+    // Nodes
+    for (const n of nodes) {
+        n.x += n.vx * intensity;
+        n.y += n.vy * intensity;
+        n.pulse += 0.04 * intensity;
+
+        // Bounce
+        if (n.x < 0 || n.x > w) n.vx *= -1;
+        if (n.y < 0 || n.y > h) n.vy *= -1;
+
+        const glow = 0.5 + Math.sin(n.pulse) * 0.35;
+        const r = n.r * (0.9 + intensity * 0.15);
+
+        // Outer glow
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, r * 3.5, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(0, 229, 255, ${0.07 * glow * intensity})`;
+        ctx.fill();
+
+        // Core
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(180, 245, 255, ${0.75 + glow * 0.25})`;
+        ctx.fill();
+    }
+
+    requestAnimationFrame(drawNetwork);
+}
+
+function setNetworkState(state) {
     if (state === 'listening') {
-        targetSpeed = 0.018;
-        intensity = 1.6;
-        holoCircle.classList.add('active');
-        holoCircle.classList.remove('speaking');
+        intensity = 1.7;
+        statusEl.className = 'status listening';
+        statusCore.style.background = '#00ff9d';
     } else if (state === 'speaking') {
-        targetSpeed = 0.028;
-        intensity = 2.1;
-        holoCircle.classList.add('speaking');
-        holoCircle.classList.remove('active');
+        intensity = 2.2;
+        statusEl.className = 'status speaking';
+        statusCore.style.background = '#00ffcc';
     } else {
-        targetSpeed = 0.004;
         intensity = 1;
-        holoCircle.classList.remove('active', 'speaking');
+        statusEl.className = 'status';
+        statusCore.style.background = '';
     }
 }
 
-initParticles();
-drawOrb();
-
-// ---------- Background particles ----------
-function createParticles() {
-    const container = document.getElementById('particles');
-    for (let i = 0; i < 30; i++) {
-        const p = document.createElement('div');
-        p.className = 'particle';
-        p.style.left = Math.random() * 100 + '%';
-        p.style.animationDelay = Math.random() * 15 + 's';
-        p.style.animationDuration = (10 + Math.random() * 15) + 's';
-        container.appendChild(p);
-    }
+// Neuron counter animation
+let baseNeurons = 480;
+function updateNeuronCount() {
+    const variation = Math.floor(Math.random() * 40) - 15;
+    const count = baseNeurons + variation + Math.floor(intensity * 20);
+    neuronCountEl.textContent = `${count} neuroni online`;
 }
-createParticles();
+setInterval(updateNeuronCount, 2200);
 
-// ---------- Speech Synthesis ----------
+// Init canvas
+resizeCanvas();
+initNetwork();
+drawNetwork();
+window.addEventListener('resize', () => {
+    resizeCanvas();
+    initNetwork();
+});
+
+// ---------- Speech Synthesis (voce migliorata) ----------
 function speak(text) {
     if (!window.speechSynthesis) return;
 
@@ -179,42 +180,47 @@ function speak(text) {
 
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'it-IT';
-    utterance.rate = 0.95;
-    utterance.pitch = 0.85;
+    utterance.rate = 0.92;
+    utterance.pitch = 0.8;
     utterance.volume = 1;
 
     const voices = speechSynthesis.getVoices();
-    const italianVoice = voices.find(v =>
-        v.lang.startsWith('it') &&
-        (v.name.includes('Google') || v.name.includes('Microsoft') || v.name.includes('Luca') || v.name.includes('Alice') || v.name.includes('Natural') || v.name.includes('Enhanced'))
-    ) || voices.find(v => v.lang.startsWith('it'));
 
-    if (italianVoice) utterance.voice = italianVoice;
+    // Cerca le voci italiane migliori disponibili
+    const preferred = voices.find(v =>
+        v.lang.startsWith('it') &&
+        (v.name.includes('Natural') || v.name.includes('Enhanced') ||
+         v.name.includes('Google') || v.name.includes('Luca') ||
+         v.name.includes('Alice') || v.name.includes('Microsoft'))
+    ) || voices.find(v => v.lang.startsWith('it') && v.localService === false)
+      || voices.find(v => v.lang.startsWith('it'));
+
+    if (preferred) utterance.voice = preferred;
 
     utterance.onstart = () => {
         isSpeaking = true;
-        setStatus('speaking', 'Sta parlando...');
-        setOrbState('speaking');
+        setStatus('speaking', 'ELABORAZIONE VOCALE');
+        setNetworkState('speaking');
     };
 
     utterance.onend = () => {
         isSpeaking = false;
-        setStatus('idle', 'In attesa');
-        setOrbState('idle');
+        setStatus('idle', 'SISTEMI IN ATTESA');
+        setNetworkState('idle');
         listeningText.textContent = 'Tocca il microfono e parla';
     };
 
     utterance.onerror = () => {
         isSpeaking = false;
-        setStatus('idle', 'In attesa');
-        setOrbState('idle');
+        setStatus('idle', 'SISTEMI IN ATTESA');
+        setNetworkState('idle');
     };
 
     if (voices.length === 0) {
         speechSynthesis.onvoiceschanged = () => {
-            const updatedVoices = speechSynthesis.getVoices();
-            const voice = updatedVoices.find(v => v.lang.startsWith('it')) || updatedVoices[0];
-            if (voice) utterance.voice = voice;
+            const updated = speechSynthesis.getVoices();
+            const v = updated.find(v => v.lang.startsWith('it')) || updated[0];
+            if (v) utterance.voice = v;
             speechSynthesis.speak(utterance);
         };
     } else {
@@ -238,8 +244,8 @@ function initRecognition() {
 
     recog.onstart = () => {
         isListening = true;
-        setStatus('listening', 'Ti ascolto...');
-        setOrbState('listening');
+        setStatus('listening', 'IN ASCOLTO');
+        setNetworkState('listening');
         micBtn.classList.add('listening');
         listeningText.textContent = 'Ti sto ascoltando...';
     };
@@ -256,7 +262,7 @@ function initRecognition() {
         console.error('Errore riconoscimento:', event.error);
         stopListening();
         if (event.error === 'no-speech') {
-            addMessage('Non ho sentito nulla. Prova di nuovo.', 'jarvis');
+            addMessage('Non ho rilevato audio. Riprova.', 'jarvis');
         } else if (event.error === 'not-allowed') {
             listeningText.textContent = 'Autorizza il microfono nelle impostazioni';
             addMessage('Devi autorizzare il microfono per parlarmi.', 'jarvis');
@@ -281,8 +287,8 @@ function startListening() {
 
 function stopListening() {
     isListening = false;
-    setStatus('idle', 'In attesa');
-    setOrbState('idle');
+    setStatus('idle', 'SISTEMI IN ATTESA');
+    setNetworkState('idle');
     micBtn.classList.remove('listening');
     listeningText.textContent = 'Tocca il microfono e parla';
 }
@@ -308,7 +314,7 @@ function reply(text) {
     setTimeout(() => {
         addMessage(text, 'jarvis');
         speak(text);
-    }, 250);
+    }, 220);
 }
 
 // ---------- Note download ----------
@@ -334,7 +340,7 @@ function createAndDownloadNote(content) {
     return filename;
 }
 
-// ---------- Gemini AI via Cloudflare Worker ----------
+// ---------- Gemini via Worker ----------
 async function askGemini(userMessage) {
     const systemPrompt = `Sei J.A.R.V.I.S., l'assistente personale intelligente ispirato a Iron Man.
 Rispondi sempre in italiano, in modo cortese, preciso e un po' formale (usa "signore" quando appropriato).
@@ -342,8 +348,8 @@ Risposte brevi e chiare, ideali per essere lette ad alta voce (massimo 2-3 frasi
 Puoi aiutare con domande generali, curiosità, consigli, calcoli semplici, traduzioni, ecc.`;
 
     try {
-        setStatus('speaking', 'Sto pensando...');
-        setOrbState('speaking');
+        setStatus('speaking', 'ELABORAZIONE NEURALE');
+        setNetworkState('speaking');
 
         const res = await fetch(WORKER_URL, {
             method: 'POST',
@@ -361,14 +367,21 @@ Puoi aiutare con domande generali, curiosità, consigli, calcoli semplici, tradu
         });
 
         if (!res.ok) {
-            console.error('Worker error:', await res.text());
+            const errText = await res.text();
+            console.error('Worker error:', errText);
+            if (res.status === 503) {
+                return 'I sistemi AI sono momentaneamente sovraccarichi. Riprova tra poco.';
+            }
             return 'Mi dispiace, al momento non riesco a contattare i sistemi avanzati.';
         }
 
         const data = await res.json();
 
         if (data.error) {
-            console.error('Gemini error via worker:', data.error);
+            console.error('Gemini error:', data.error);
+            if (data.error.status === 'UNAVAILABLE' || data.error.code === 503) {
+                return 'I sistemi AI sono momentaneamente sovraccarichi. Riprova tra poco.';
+            }
             return 'Si è verificato un problema con i sistemi AI.';
         }
 
@@ -376,7 +389,7 @@ Puoi aiutare con domande generali, curiosità, consigli, calcoli semplici, tradu
         return text ? text.trim() : 'Non ho ricevuto una risposta valida.';
     } catch (e) {
         console.error(e);
-        return 'Si è verificato un errore di errore di connessione con i sistemi AI.';
+        return 'Si è verificato un errore di connessione con i sistemi AI.';
     }
 }
 
@@ -403,34 +416,27 @@ function setLight(room, on) {
     return null;
 }
 
-// ---------- Main command processor ----------
+// ---------- Command processor ----------
 async function processCommand(command) {
     const cmd = command.toLowerCase().trim();
     let response = '';
     let handled = true;
 
-    // ===== NOTE =====
+    // NOTE
     const notePatterns = [
         /^(?:scrivi\s+(?:su\s+)?note?|scrivimi\s+(?:su\s+)?note?|nota|crea\s+(?:una\s+)?nota)\s*[:\-]?\s*(.+)/i,
         /^(?:scrivi\s+(?:su\s+)?note?|scrivimi\s+(?:su\s+)?note?)\s+(.+)/i
     ];
-
     let noteContent = null;
     for (const pattern of notePatterns) {
         const match = command.match(pattern);
-        if (match && match[1]) {
-            noteContent = match[1].trim();
-            break;
-        }
+        if (match && match[1]) { noteContent = match[1].trim(); break; }
     }
-
     if (!noteContent && /^(scrivi\s+su\s+note|scrivimi\s+su\s+note|scrivi\s+una\s+nota)/i.test(cmd)) {
         const parts = command.split(/:/);
-        noteContent = parts.length > 1
-            ? parts.slice(1).join(':').trim()
+        noteContent = parts.length > 1 ? parts.slice(1).join(':').trim()
             : command.replace(/^(scrivi\s+su\s+note|scrivimi\s+su\s+note|scrivi\s+una\s+nota)\s*/i, '').trim();
     }
-
     if (noteContent && noteContent.length > 0) {
         try {
             const filename = createAndDownloadNote(noteContent);
@@ -442,7 +448,7 @@ async function processCommand(command) {
         return;
     }
 
-    // ===== LUCI =====
+    // LUCI
     if (/(accendi|attiva|apri).*(luce|luci|illuminazione)/.test(cmd) || /(luce|luci).*(accendi|attiva)/.test(cmd)) {
         const room = matchRoom(cmd) || 'tutte';
         response = setLight(room, true) || 'Non ho riconosciuto la stanza.';
@@ -456,7 +462,7 @@ async function processCommand(command) {
         response = accese.length ? `Al momento sono accese le luci di: ${accese.join(', ')}.` : 'Tutte le luci sono spente.';
     }
 
-    // ===== TEMPERATURA =====
+    // TEMPERATURA
     else if (/(imposta|metti|porta a|imposta la temperatura).*(\d+)/.test(cmd) || /temperatura.*(a\s+)?(\d+)/.test(cmd)) {
         const match = cmd.match(/(\d{1,2})/);
         if (match) {
@@ -464,9 +470,7 @@ async function processCommand(command) {
             if (temp >= 16 && temp <= 30) {
                 home.temperatura = temp;
                 response = `Temperatura impostata a ${temp} gradi.`;
-            } else {
-                response = 'Posso impostare la temperatura solo tra 16 e 30 gradi.';
-            }
+            } else response = 'Posso impostare la temperatura solo tra 16 e 30 gradi.';
         }
     }
     else if (/(aumenta|alza|più caldo).*(temperatura|clima|riscaldamento)/.test(cmd)) {
@@ -481,57 +485,30 @@ async function processCommand(command) {
         response = `La temperatura è impostata a ${home.temperatura} gradi.`;
     }
 
-    // ===== TV =====
-    else if (/(accendi|apri).*(tv|televisione|tele)/.test(cmd)) {
-        home.tv = true;
-        response = 'Televisione accesa.';
-    }
-    else if (/(spegni|chiudi).*(tv|televisione|tele)/.test(cmd)) {
-        home.tv = false;
-        response = 'Televisione spenta.';
-    }
+    // TV
+    else if (/(accendi|apri).*(tv|televisione|tele)/.test(cmd)) { home.tv = true; response = 'Televisione accesa.'; }
+    else if (/(spegni|chiudi).*(tv|televisione|tele)/.test(cmd)) { home.tv = false; response = 'Televisione spenta.'; }
 
-    // ===== MUSICA / VOLUME =====
-    else if (/(metti|avvia|accendi|riproduci).*(musica|canzone|spotify|playlist)/.test(cmd)) {
-        home.musica = true;
-        response = 'Musica avviata.';
-    }
-    else if (/(ferma|stop|spegni|pausa).*(musica|canzone)/.test(cmd)) {
-        home.musica = false;
-        response = 'Musica fermata.';
-    }
-    else if (/(alza|aumenta).*(volume)/.test(cmd)) {
-        home.volume = Math.min(100, home.volume + 10);
-        response = `Volume impostato a ${home.volume}%.`;
-    }
-    else if (/(abbassa|diminuisci).*(volume)/.test(cmd)) {
-        home.volume = Math.max(0, home.volume - 10);
-        response = `Volume impostato a ${home.volume}%.`;
-    }
+    // MUSICA / VOLUME
+    else if (/(metti|avvia|accendi|riproduci).*(musica|canzone|spotify|playlist)/.test(cmd)) { home.musica = true; response = 'Musica avviata.'; }
+    else if (/(ferma|stop|spegni|pausa).*(musica|canzone)/.test(cmd)) { home.musica = false; response = 'Musica fermata.'; }
+    else if (/(alza|aumenta).*(volume)/.test(cmd)) { home.volume = Math.min(100, home.volume + 10); response = `Volume impostato a ${home.volume}%.`; }
+    else if (/(abbassa|diminuisci).*(volume)/.test(cmd)) { home.volume = Math.max(0, home.volume - 10); response = `Volume impostato a ${home.volume}%.`; }
     else if (/(volume a|imposta volume|volume al)\s*(\d+)/.test(cmd)) {
         const match = cmd.match(/(\d{1,3})/);
-        if (match) {
-            home.volume = Math.min(100, Math.max(0, parseInt(match[1])));
-            response = `Volume impostato a ${home.volume}%.`;
-        }
+        if (match) { home.volume = Math.min(100, Math.max(0, parseInt(match[1]))); response = `Volume impostato a ${home.volume}%.`; }
     }
-    else if (/muto|silenzia|togli audio/.test(cmd)) {
-        home.volume = 0;
-        response = 'Audio disattivato.';
-    }
+    else if (/muto|silenzia|togli audio/.test(cmd)) { home.volume = 0; response = 'Audio disattivato.'; }
 
-    // ===== TIMER =====
+    // TIMER
     else if (/(timer|conta|impostami un timer).*(?:di\s+)?(\d+)\s*(minuti|minuto|secondi|secondo)?/.test(cmd) || /(?:tra|fra)\s+(\d+)\s*(minuti|minuto)/.test(cmd)) {
         const match = cmd.match(/(\d+)\s*(minuti|minuto|secondi|secondo)?/);
         if (match) {
             let seconds = parseInt(match[1]);
             const unit = match[2] || 'minuti';
             if (unit.startsWith('minut')) seconds *= 60;
-
             if (home.timer) clearTimeout(home.timer);
-
             response = `Timer impostato per ${match[1]} ${unit}. Ti avviso quando scade.`;
-
             home.timer = setTimeout(() => {
                 const msg = 'Il timer è scaduto.';
                 addMessage(msg, 'jarvis');
@@ -541,79 +518,49 @@ async function processCommand(command) {
         }
     }
     else if (/(cancella|ferma|annulla).*(timer)/.test(cmd)) {
-        if (home.timer) {
-            clearTimeout(home.timer);
-            home.timer = null;
-            response = 'Timer annullato.';
-        } else {
-            response = 'Non c\'è nessun timer attivo.';
-        }
+        if (home.timer) { clearTimeout(home.timer); home.timer = null; response = 'Timer annullato.'; }
+        else response = 'Non c\'è nessun timer attivo.';
     }
 
-    // ===== LISTA SPESA =====
+    // LISTA SPESA
     else if (/(aggiungi|metti).*(lista|spesa|shopping)\s+(.+)/.test(cmd) || /lista spesa\s*[:\-]\s*(.+)/.test(cmd)) {
-        let item = cmd.replace(/(aggiungi|metti)\s+(alla\s+)?(lista|spesa|shopping)\s*/i, '')
-                      .replace(/lista spesa\s*[:\-]\s*/i, '').trim();
-        if (item) {
-            home.listaSpesa.push(item);
-            response = `Ho aggiunto "${item}" alla lista della spesa.`;
-        }
+        let item = cmd.replace(/(aggiungi|metti)\s+(alla\s+)?(lista|spesa|shopping)\s*/i, '').replace(/lista spesa\s*[:\-]\s*/i, '').trim();
+        if (item) { home.listaSpesa.push(item); response = `Ho aggiunto "${item}" alla lista della spesa.`; }
     }
     else if (/(cosa c'è|mostrami|dimmi|leggi).*(lista|spesa)/.test(cmd) || /lista della spesa/.test(cmd)) {
-        response = home.listaSpesa.length
-            ? `Nella lista della spesa ci sono: ${home.listaSpesa.join(', ')}.`
-            : 'La lista della spesa è vuota.';
+        response = home.listaSpesa.length ? `Nella lista della spesa ci sono: ${home.listaSpesa.join(', ')}.` : 'La lista della spesa è vuota.';
     }
-    else if (/(svuota|cancella|elimina).*(lista|spesa)/.test(cmd)) {
-        home.listaSpesa = [];
-        response = 'Lista della spesa svuotata.';
-    }
+    else if (/(svuota|cancella|elimina).*(lista|spesa)/.test(cmd)) { home.listaSpesa = []; response = 'Lista della spesa svuotata.'; }
 
-    // ===== PROMEMORIA =====
+    // PROMEMORIA
     else if (/(ricordami|promemoria|ricorda).*(di\s+)?(.+)/.test(cmd)) {
         const match = command.match(/(?:ricordami|promemoria|ricorda)\s+(?:di\s+)?(.+)/i);
-        if (match && match[1]) {
-            const item = match[1].trim();
-            home.promemoria.push(item);
-            response = `Promemoria aggiunto: ${item}`;
-        }
+        if (match && match[1]) { home.promemoria.push(match[1].trim()); response = `Promemoria aggiunto: ${match[1].trim()}`; }
     }
     else if (/(quali sono i|mostrami i|dimmi i|leggi i).*(promemoria|ricordi)/.test(cmd)) {
-        response = home.promemoria.length
-            ? `I tuoi promemoria: ${home.promemoria.join('; ')}.`
-            : 'Non hai promemoria salvati.';
+        response = home.promemoria.length ? `I tuoi promemoria: ${home.promemoria.join('; ')}.` : 'Non hai promemoria salvati.';
     }
 
-    // ===== ROUTINE =====
+    // ROUTINE
     else if (/(buongiorno|giornata|sveglia|routine mattina|modalità giorno)/.test(cmd) && !/(che ora|che giorno)/.test(cmd)) {
-        setLight('tutte', false);
-        setLight('soggiorno', true);
-        setLight('cucina', true);
+        setLight('tutte', false); setLight('soggiorno', true); setLight('cucina', true);
         home.temperatura = 21;
         response = 'Buongiorno. Ho acceso le luci del soggiorno e della cucina, e impostato la temperatura a 21 gradi. Buona giornata.';
     }
     else if (/(buonanotte|vanno a dormire|modalità notte|routine sera|spengi tutto)/.test(cmd)) {
-        setLight('tutte', false);
-        home.tv = false;
-        home.musica = false;
-        home.temperatura = 19;
+        setLight('tutte', false); home.tv = false; home.musica = false; home.temperatura = 19;
         response = 'Buonanotte. Ho spento tutte le luci, la TV e la musica. Temperatura impostata a 19 gradi. Riposi bene.';
     }
     else if (/(cinema|film|modalità cinema)/.test(cmd)) {
-        setLight('tutte', false);
-        setLight('soggiorno', true);
-        home.tv = true;
-        home.volume = 30;
+        setLight('tutte', false); setLight('soggiorno', true); home.tv = true; home.volume = 30;
         response = 'Modalità cinema attivata. Luci abbassate, TV accesa e volume impostato.';
     }
     else if (/(esci|esco di casa|via di casa|modalità fuori)/.test(cmd)) {
-        setLight('tutte', false);
-        home.tv = false;
-        home.musica = false;
+        setLight('tutte', false); home.tv = false; home.musica = false;
         response = 'Modalità fuori casa attivata. Ho spento luci, TV e musica. Buona uscita.';
     }
 
-    // ===== INFO BASE =====
+    // INFO BASE
     else if (/(ciao|salve|buongiorno|buonasera|ehi|hey)/.test(cmd) && !/(routine|modalità)/.test(cmd)) {
         const hour = new Date().getHours();
         if (hour < 12) response = 'Buongiorno, signore. Come posso assisterla oggi?';
@@ -621,18 +568,16 @@ async function processCommand(command) {
         else response = 'Buonasera. Pronto per qualsiasi richiesta.';
     }
     else if (/(che ora|che ore|ora attuale|dimmi l'ora|che ora è)/.test(cmd)) {
-        const now = new Date();
-        response = `Sono le ${now.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}.`;
+        response = `Sono le ${new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}.`;
     }
     else if (/(che giorno|che data|data di oggi|che giorno è)/.test(cmd)) {
-        const now = new Date();
-        response = `Oggi è ${now.toLocaleDateString('it-IT', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}.`;
+        response = `Oggi è ${new Date().toLocaleDateString('it-IT', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}.`;
     }
     else if (/(come stai|come va|tutto bene)/.test(cmd)) {
-        response = 'Tutti i sistemi funzionano a regime ottimale. Grazie per aver chiesto.';
+        response = 'Tutti i sistemi neurali funzionano a regime ottimale. Grazie per aver chiesto.';
     }
     else if (/(chi sei|presentati|cosa sei)/.test(cmd)) {
-        response = 'Sono J.A.R.V.I.S., Just A Rather Very Intelligent System. Il suo assistente personale, ora potenziato con intelligenza artificiale.';
+        response = 'Sono J.A.R.V.I.S., Just A Rather Very Intelligent System. Il suo assistente personale potenziato da una rete neurale.';
     }
     else if (/(grazie|ti ringrazio|thanks)/.test(cmd)) {
         response = 'Di nulla, signore. Sono qui per questo.';
@@ -641,18 +586,17 @@ async function processCommand(command) {
         response = 'Il signor Stark non è disponibile al momento. Posso aiutarla io nel frattempo?';
     }
     else if (/(aiuto|cosa puoi fare|comandi|help|lista comandi)/.test(cmd)) {
-        response = 'Posso gestire luci, temperatura, TV, musica, volume, timer, lista spesa, promemoria, note e routine. Inoltre ora posso rispondere a domande generali grazie all\'intelligenza artificiale. Provi pure a chiedermi qualsiasi cosa.';
+        response = 'Posso gestire luci, temperatura, TV, musica, volume, timer, lista spesa, promemoria, note e routine. Inoltre rispondo a domande generali tramite la rete neurale. Provi pure.';
     }
 
-    // ===== FALLBACK → GEMINI via Worker =====
+    // FALLBACK → GEMINI
     else {
         handled = false;
         response = await askGemini(command);
     }
 
-    if (handled) {
-        reply(response);
-    } else {
+    if (handled) reply(response);
+    else {
         addMessage(response, 'jarvis');
         speak(response);
     }
@@ -662,18 +606,15 @@ async function processCommand(command) {
 micBtn.addEventListener('click', () => {
     if (!hasGreeted) {
         hasGreeted = true;
-        const greeting = 'Sistema avviato. Pronto ad assisterti, signore.';
+        const greeting = 'Sistema neurale avviato. Pronto ad assisterti, signore.';
         addMessage(greeting, 'jarvis');
         speak(greeting);
         return;
     }
-
     if (isListening) {
         if (recognition) recognition.stop();
         stopListening();
-    } else {
-        startListening();
-    }
+    } else startListening();
 });
 
 sendBtn.addEventListener('click', () => {
