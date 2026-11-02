@@ -17,26 +17,16 @@ let recognition = null;
 let hasGreeted = false;
 let intensity = 1;
 
-const WORKER_URL = 'https://frosty-waterfall-d1b0.gfurceri9.workers.dev';
-const WORKER_TTS_ENDPOINTS = [
-    WORKER_URL.replace(/\/$/, ''),
-    `${WORKER_URL.replace(/\/$/, '')}/tts`,
-    `${WORKER_URL.replace(/\/$/, '')}/api/tts`
-];
+const WORKER_URL = 'https://jarvis-gemini.gfurceri9.workers.dev';
+const TTS_WORKER_URL = 'https://frosty-waterfall-d1b0.gfurceri9.workers.dev/';
+const TTS_VOICE_ID = 'pNInz6obpgDQGcFmaJgB';
 
-const VOICE_CONFIG = {
-    preferredLanguage: 'it-IT',
-    rate: 0.82,
-    pitch: 0.72,
-    volume: 1,
-    useExternalFallback: true,
-    externalTtsUrl: WORKER_URL,
-    voiceHints: ['google italiano', 'italiano', 'luca', 'paolo', 'giorgio', 'enrico', 'daniele']
-};
-
-const speechQueue = [];
-let speechSequence = 0;
+const TTS_QUEUE = [];
+let ttsPlaying = false;
+let ttsGeneration = 0;
+let ttsAbortController = null;
 let activeAudio = null;
+let activeAudioUrl = null;
 
 const home = {
     lights: { soggiorno: false, cucina: false, camera: false, bagno: false, corridoio: false, tutte: false },
@@ -161,242 +151,146 @@ try {
     window.addEventListener('resize', () => { resizeCanvas(); initNetwork(); });
 } catch(e) { console.warn(e); }
 
-// ===== Voice System =====
-function normalizeSpeechText(text) {
-    return String(text || '')
-        .replace(/\s+/g, ' ')
-        .replace(/\bJ\.A\.R\.V\.I\.S\.?\b/gi, 'Jarvis')
-        .replace(/\bAI\b/gi, 'A I')
-        .replace(/\bURL\b/gi, 'u r l')
-        .trim();
-}
-
-function scoreVoice(voice) {
-    if (!voice) return -Infinity;
-    const name = (voice.name || '').toLowerCase();
-    const lang = (voice.lang || '').toLowerCase();
-    let score = 0;
-
-    if (lang.startsWith('it')) score += 50;
-    if (/(google|italiano|italian)/.test(name)) score += 25;
-    if (/(luca|paolo|giorgio|enrico|daniele|male|uomo)/.test(name)) score += 35;
-    if (/(natural|premium|studio|voice)/.test(name)) score += 12;
-    if (/(alice|samantha|female|donna)/.test(name)) score -= 25;
-    if (lang.includes('en')) score -= 8;
-    return score;
-}
-
-function getBestVoice() {
-    if (!('speechSynthesis' in window)) return null;
-    const voices = speechSynthesis.getVoices();
-    if (!voices.length) return null;
-
-    const italianVoices = voices.filter(v => (v.lang || '').toLowerCase().startsWith('it'));
-    const ranked = [...italianVoices].sort((a, b) => scoreVoice(b) - scoreVoice(a));
-    if (ranked.length) return ranked[0];
-
-    return [...voices].sort((a, b) => scoreVoice(b) - scoreVoice(a))[0] || null;
-}
-
-function buildSpeechUtterance(text, options = {}) {
-    const utterance = new SpeechSynthesisUtterance(normalizeSpeechText(text));
-    utterance.lang = options.lang || VOICE_CONFIG.preferredLanguage;
-    utterance.rate = options.rate ?? VOICE_CONFIG.rate;
-    utterance.pitch = options.pitch ?? VOICE_CONFIG.pitch;
-    utterance.volume = options.volume ?? VOICE_CONFIG.volume;
-
-    const preferredVoice = options.voice || getBestVoice();
-    if (preferredVoice) utterance.voice = preferredVoice;
-
-    return utterance;
-}
-
-function stopActiveAudio() {
+// ===== ElevenLabs TTS =====
+function cleanupAudio() {
     if (activeAudio) {
-        try { activeAudio.pause(); } catch (e) {}
+        activeAudio.onended = null;
+        activeAudio.onerror = null;
+        activeAudio.pause();
         activeAudio.src = '';
         activeAudio = null;
     }
-}
-
-function finishSpeech() {
-    isSpeaking = false;
-    setStatus('idle', 'SISTEMI IN ATTESA');
-    setNetworkState('idle');
-    if (listeningText) listeningText.textContent = 'Tocca il microfono e parla';
-    processSpeechQueue();
-}
-
-async function fetchVoiceFromWorker(text, options = {}) {
-    const payload = {
-        text: String(text || '').trim(),
-        voice: options.voice || 'jarvis',
-        language: options.lang || VOICE_CONFIG.preferredLanguage,
-        model_id: options.model || 'eleven_multilingual_v2'
-    };
-
-    let lastError = null;
-
-    for (const endpoint of WORKER_TTS_ENDPOINTS) {
-        try {
-            const response = await fetch(endpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-
-            if (!response.ok) {
-                lastError = new Error(`TTS worker returned ${response.status}`);
-                continue;
-            }
-
-            const contentType = (response.headers.get('content-type') || '').toLowerCase();
-
-            if (contentType.includes('audio') || contentType.includes('mpeg') || contentType.includes('wav') || contentType.includes('octet-stream')) {
-                return { type: 'blob', blob: await response.blob() };
-            }
-
-            const json = await response.json().catch(() => null);
-            if (json && json.audioUrl) return { type: 'url', url: json.audioUrl };
-            if (json && json.url) return { type: 'url', url: json.url };
-            if (json && json.data) {
-                if (typeof json.data === 'string' && json.data.startsWith('data:')) {
-                    return { type: 'data-url', url: json.data };
-                }
-                if (typeof json.data === 'string' && /^https?:\//.test(json.data)) {
-                    return { type: 'url', url: json.data };
-                }
-            }
-            if (json && json.error) {
-                lastError = new Error(json.error);
-                continue;
-            }
-        } catch (error) {
-            lastError = error;
-        }
+    if (activeAudioUrl) {
+        URL.revokeObjectURL(activeAudioUrl);
+        activeAudioUrl = null;
     }
-
-    throw lastError || new Error('TTS worker unavailable');
 }
 
-function playAudioResult(result) {
+function speakWithBrowserFallback(text) {
     return new Promise((resolve, reject) => {
-        let sourceUrl = '';
-
-        if (result.type === 'blob') {
-            sourceUrl = URL.createObjectURL(result.blob);
-        } else if (result.type === 'url') {
-            sourceUrl = result.url;
-        } else if (result.type === 'data-url') {
-            sourceUrl = result.url;
-        } else {
-            reject(new Error('No audio content available'));
+        if (!window.speechSynthesis) {
+            resolve();
             return;
         }
-
-        const audio = new Audio(sourceUrl);
-        activeAudio = audio;
-        audio.volume = 1;
-        audio.preload = 'auto';
-
-        audio.onended = () => {
-            try { if (sourceUrl.startsWith('blob:')) URL.revokeObjectURL(sourceUrl); } catch (e) {}
-            activeAudio = null;
-            resolve();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'it-IT';
+        utterance.rate = 0.92;
+        utterance.pitch = 0.9;
+        utterance.volume = 1;
+        utterance.onend = resolve;
+        utterance.onerror = (event) => {
+            if (event.error === 'canceled' || event.error === 'interrupted') resolve();
+            else reject(new Error(`Fallback TTS: ${event.error || 'errore'}`));
         };
-
-        audio.onerror = () => {
-            try { if (sourceUrl.startsWith('blob:')) URL.revokeObjectURL(sourceUrl); } catch (e) {}
-            activeAudio = null;
-            reject(new Error('Audio playback error'));
-        };
-
-        audio.play().then(() => {
-            // keep playback chain active until onended fires
-        }).catch((error) => {
-            try { if (sourceUrl.startsWith('blob:')) URL.revokeObjectURL(sourceUrl); } catch (e) {}
-            activeAudio = null;
-            reject(error);
-        });
+        speechSynthesis.cancel();
+        speechSynthesis.speak(utterance);
     });
 }
 
-function fallbackSpeechSynthesis(text, options = {}) {
-    if (!window.speechSynthesis) {
-        finishSpeech();
-        return;
-    }
+async function playMp3Blob(blob, token) {
+    if (token !== ttsGeneration) return;
+    cleanupAudio();
+    activeAudioUrl = URL.createObjectURL(blob);
+    const audio = new Audio(activeAudioUrl);
+    activeAudio = audio;
+    audio.preload = 'auto';
 
-    const utterance = buildSpeechUtterance(text, options);
-    utterance.onstart = () => {
-        isSpeaking = true;
-        setStatus('speaking', 'ELABORAZIONE VOCALE');
-        setNetworkState('speaking');
-    };
-    utterance.onend = () => finishSpeech();
-    utterance.onerror = () => finishSpeech();
-    speechSynthesis.speak(utterance);
+    await new Promise((resolve, reject) => {
+        const onDone = (error) => {
+            if (activeAudio === audio) activeAudio = null;
+            if (activeAudioUrl) {
+                URL.revokeObjectURL(activeAudioUrl);
+                activeAudioUrl = null;
+            }
+            error ? reject(error) : resolve();
+        };
+        audio.onended = () => onDone();
+        audio.onerror = () => onDone(new Error('Impossibile riprodurre l’audio del worker.'));
+        audio.play().catch(onDone);
+    });
 }
 
-async function processSpeechQueue() {
-    if (isSpeaking || !speechQueue.length) {
-        return;
-    }
+async function processTtsQueue() {
+    if (ttsPlaying || TTS_QUEUE.length === 0) return;
 
-    const next = speechQueue.shift();
-    if (!next) return;
-
+    const text = TTS_QUEUE.shift();
+    const token = ttsGeneration;
+    ttsPlaying = true;
     isSpeaking = true;
     setStatus('speaking', 'ELABORAZIONE VOCALE');
     setNetworkState('speaking');
+    ttsAbortController = new AbortController();
 
     try {
-        const result = await fetchVoiceFromWorker(next.text, next.options || {});
-        await playAudioResult(result);
-        finishSpeech();
+        const response = await fetch(TTS_WORKER_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'audio/mpeg'
+            },
+            body: JSON.stringify({ text, voice_id: TTS_VOICE_ID }),
+            signal: ttsAbortController.signal
+        });
+
+        if (!response.ok) {
+            const detail = await response.text().catch(() => '');
+            throw new Error(`TTS worker HTTP ${response.status}${detail ? `: ${detail.slice(0, 160)}` : ''}`);
+        }
+
+        const contentType = (response.headers.get('content-type') || '').toLowerCase();
+        if (!contentType.includes('audio') && !contentType.includes('mpeg') && !contentType.includes('octet-stream')) {
+            const detail = await response.text().catch(() => '');
+            throw new Error(`Risposta worker non audio (${contentType || 'Content-Type assente'})${detail ? `: ${detail.slice(0, 160)}` : ''}`);
+        }
+
+        const blob = await response.blob();
+        if (!blob.size) throw new Error('Il worker ha restituito un audio vuoto.');
+        await playMp3Blob(blob, token);
     } catch (error) {
-        console.warn('Voice worker unavailable. Falling back to local speech synthesis.', error);
-        fallbackSpeechSynthesis(next.text, next.options || {});
+        if (error.name === 'AbortError' || token !== ttsGeneration) return;
+        console.error('[Jarvis TTS] ElevenLabs non disponibile:', error);
+        try {
+            await speakWithBrowserFallback(text);
+        } catch (fallbackError) {
+            console.error('[Jarvis TTS] Fallback non disponibile:', fallbackError);
+        }
+    } finally {
+        if (token === ttsGeneration) {
+            ttsAbortController = null;
+            ttsPlaying = false;
+            isSpeaking = false;
+            setStatus('idle', 'SISTEMI IN ATTESA');
+            setNetworkState('idle');
+            if (listeningText) listeningText.textContent = 'Tocca il microfono e parla';
+            if (TTS_QUEUE.length > 0) processTtsQueue();
+        }
     }
 }
 
-function interruptSpeech() {
-    if (!window.speechSynthesis) {
-        // no-op fallback only
+function interruptTts() {
+    ttsGeneration += 1;
+    TTS_QUEUE.length = 0;
+    if (ttsAbortController) {
+        ttsAbortController.abort();
+        ttsAbortController = null;
     }
-
-    stopActiveAudio();
+    cleanupAudio();
     if (window.speechSynthesis) speechSynthesis.cancel();
-    speechQueue.length = 0;
+    ttsPlaying = false;
     isSpeaking = false;
     setStatus('idle', 'SISTEMI IN ATTESA');
     setNetworkState('idle');
     if (listeningText) listeningText.textContent = 'Tocca il microfono e parla';
 }
 
-function speak(text, options = {}) {
-    if (!text || !String(text).trim()) return;
-
-    const item = {
-        id: ++speechSequence,
-        text: String(text).trim(),
-        options: {
-            lang: VOICE_CONFIG.preferredLanguage,
-            rate: VOICE_CONFIG.rate,
-            pitch: VOICE_CONFIG.pitch,
-            volume: VOICE_CONFIG.volume,
-            ...options
-        }
-    };
-
-    if (options.interrupt) {
-        interruptSpeech();
-    }
-
-    speechQueue.push(item);
-    processSpeechQueue();
+function speak(text) {
+    const cleanText = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!cleanText) return;
+    TTS_QUEUE.push(cleanText);
+    processTtsQueue();
 }
 
+// ===== Speech =====
 function initRecognition() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return null;
@@ -423,13 +317,10 @@ function initRecognition() {
     r.onend = () => stopListening();
     return r;
 }
-
 recognition = initRecognition();
 
 function startListening() {
-    if (isSpeaking) {
-        interruptSpeech();
-    }
+    if (isSpeaking) interruptTts();
     if (recognition && !isListening) {
         try { recognition.start(); } catch(e) {}
     }
@@ -460,7 +351,7 @@ function showReply(text) {
 
 function reply(text) {
     showReply(text);
-    speak(text, { interrupt: false });
+    speak(text);
 }
 
 // ===== Gemini =====
@@ -546,7 +437,7 @@ async function processCommand(command) {
             else response = 'Posso impostare solo tra 16 e 30 gradi.';
         }
     } else if (/(che temperatura|a quanti gradi)/.test(cmd)) {
-        response = 'La temperatura è impostata a ' + home.temperatura + ' gradi.';
+        response = 'La temperatura e impostata a ' + home.temperatura + ' gradi.';
     } else if (/(accendi|apri).*(tv|televisione)/.test(cmd)) { home.tv = true; response = 'Televisione accesa.'; }
     else if (/(spegni|chiudi).*(tv|televisione)/.test(cmd)) { home.tv = false; response = 'Televisione spenta.'; }
     else if (/(metti|avvia).*(musica)/.test(cmd)) { home.musica = true; response = 'Musica avviata.'; }
@@ -557,7 +448,7 @@ async function processCommand(command) {
             let sec = parseInt(m[1]) * 60;
             if (home.timer) clearTimeout(home.timer);
             response = 'Timer impostato per ' + m[1] + ' minuti.';
-            home.timer = setTimeout(() => { reply('Il timer è scaduto.'); }, sec*1000);
+            home.timer = setTimeout(() => { reply('Il timer e scaduto.'); }, sec*1000);
         }
     } else if (/(buongiorno)/.test(cmd) && !/che/.test(cmd)) {
         setLight('soggiorno', true); setLight('cucina', true); home.temperatura = 21;
@@ -582,7 +473,7 @@ async function processCommand(command) {
     }
 
     if (handled) reply(response);
-    else { showReply(response); speak(response, { interrupt: false }); }
+    else { showReply(response); speak(response); }
 }
 
 // ===== Events =====
@@ -617,10 +508,5 @@ if (textInput) {
 
 if (window.speechSynthesis) {
     speechSynthesis.getVoices();
-    speechSynthesis.onvoiceschanged = () => {
-        speechSynthesis.getVoices();
-    };
+    speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
 }
-
-showReply('Sistema neurale avviato. Pronto ad assisterti, signore.');
-setNetworkState('idle');
