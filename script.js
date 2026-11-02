@@ -19,6 +19,19 @@ let intensity = 1;
 
 const WORKER_URL = 'https://jarvis-gemini.gfurceri9.workers.dev';
 
+const VOICE_CONFIG = {
+    preferredLanguage: 'it-IT',
+    rate: 0.82,
+    pitch: 0.72,
+    volume: 1,
+    useExternalFallback: false,
+    externalTtsUrl: '',
+    voiceHints: ['google italiano', 'italiano', 'luca', 'paolo', 'giorgio', 'male', 'uomo', 'enrico', 'daniele']
+};
+
+const speechQueue = [];
+let speechSequence = 0;
+
 const home = {
     lights: { soggiorno: false, cucina: false, camera: false, bagno: false, corridoio: false, tutte: false },
     temperatura: 21, volume: 40, tv: false, musica: false, timer: null, listaSpesa: [], promemoria: []
@@ -142,22 +155,122 @@ try {
     window.addEventListener('resize', () => { resizeCanvas(); initNetwork(); });
 } catch(e) { console.warn(e); }
 
-// ===== Speech =====
-function speak(text) {
+// ===== Voice System =====
+function normalizeSpeechText(text) {
+    return String(text || '')
+        .replace(/\s+/g, ' ')
+        .replace(/\bJ\.A\.R\.V\.I\.S\.?\b/gi, 'Jarvis')
+        .replace(/\bAI\b/gi, 'A I')
+        .replace(/\bURL\b/gi, 'u r l')
+        .trim();
+}
+
+function scoreVoice(voice) {
+    if (!voice) return -Infinity;
+    const name = (voice.name || '').toLowerCase();
+    const lang = (voice.lang || '').toLowerCase();
+    let score = 0;
+
+    if (lang.startsWith('it')) score += 50;
+    if (/(google|italiano|italian)/.test(name)) score += 25;
+    if (/(luca|paolo|giorgio|enrico|daniele|male|uomo)/.test(name)) score += 35;
+    if (/(natural|premium|studio|voice)/.test(name)) score += 12;
+    if (/(alice|samantha|female|donna)/.test(name)) score -= 25;
+    if (lang.includes('en')) score -= 8;
+    return score;
+}
+
+function getBestVoice() {
+    if (!('speechSynthesis' in window)) return null;
+    const voices = speechSynthesis.getVoices();
+    if (!voices.length) return null;
+
+    const italianVoices = voices.filter(v => (v.lang || '').toLowerCase().startsWith('it'));
+    const ranked = [...italianVoices].sort((a, b) => scoreVoice(b) - scoreVoice(a));
+    if (ranked.length) return ranked[0];
+
+    return [...voices].sort((a, b) => scoreVoice(b) - scoreVoice(a))[0] || null;
+}
+
+function buildSpeechUtterance(text, options = {}) {
+    const utterance = new SpeechSynthesisUtterance(normalizeSpeechText(text));
+    utterance.lang = options.lang || VOICE_CONFIG.preferredLanguage;
+    utterance.rate = options.rate ?? VOICE_CONFIG.rate;
+    utterance.pitch = options.pitch ?? VOICE_CONFIG.pitch;
+    utterance.volume = options.volume ?? VOICE_CONFIG.volume;
+
+    const preferredVoice = options.voice || getBestVoice();
+    if (preferredVoice) utterance.voice = preferredVoice;
+
+    return utterance;
+}
+
+function flushSpeechQueue() {
+    if (!speechQueue.length) return;
+    if (window.speechSynthesis && (speechSynthesis.speaking || speechSynthesis.pending)) return;
+
+    const next = speechQueue.shift();
+    if (!next) return;
+
+    const utterance = buildSpeechUtterance(next.text, next.options || {});
+
+    utterance.onstart = () => {
+        isSpeaking = true;
+        setStatus('speaking', 'ELABORAZIONE VOCALE');
+        setNetworkState('speaking');
+    };
+
+    utterance.onend = () => {
+        isSpeaking = false;
+        setStatus('idle', 'SISTEMI IN ATTESA');
+        setNetworkState('idle');
+        if (listeningText) listeningText.textContent = 'Tocca il microfono e parla';
+        flushSpeechQueue();
+    };
+
+    utterance.onerror = (event) => {
+        isSpeaking = false;
+        setStatus('idle', 'SISTEMI IN ATTESA');
+        setNetworkState('idle');
+        console.warn('Speech error:', event.error || event);
+        flushSpeechQueue();
+    };
+
+    window.speechSynthesis.speak(utterance);
+}
+
+function interruptSpeech() {
     if (!window.speechSynthesis) return;
     window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = 'it-IT';
-    u.rate = 0.92;
-    u.pitch = 0.8;
-    const voices = speechSynthesis.getVoices();
-    const v = voices.find(v => v.lang.startsWith('it') && (v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Luca') || v.name.includes('Alice'))) || voices.find(v => v.lang.startsWith('it'));
-    if (v) u.voice = v;
-    u.onstart = () => { isSpeaking = true; setStatus('speaking', 'ELABORAZIONE VOCALE'); setNetworkState('speaking'); };
-    u.onend = () => { isSpeaking = false; setStatus('idle', 'SISTEMI IN ATTESA'); setNetworkState('idle'); if (listeningText) listeningText.textContent = 'Tocca il microfono e parla'; };
-    u.onerror = () => { isSpeaking = false; setStatus('idle', 'SISTEMI IN ATTESA'); setNetworkState('idle'); };
-    if (voices.length === 0) speechSynthesis.onvoiceschanged = () => speechSynthesis.speak(u);
-    else speechSynthesis.speak(u);
+    speechQueue.length = 0;
+    isSpeaking = false;
+    setStatus('idle', 'SISTEMI IN ATTESA');
+    setNetworkState('idle');
+    if (listeningText) listeningText.textContent = 'Tocca il microfono e parla';
+}
+
+function speak(text, options = {}) {
+    if (!text || !String(text).trim()) return;
+    if (!window.speechSynthesis) return;
+
+    const item = {
+        id: ++speechSequence,
+        text: String(text).trim(),
+        options: {
+            lang: VOICE_CONFIG.preferredLanguage,
+            rate: VOICE_CONFIG.rate,
+            pitch: VOICE_CONFIG.pitch,
+            volume: VOICE_CONFIG.volume,
+            ...options
+        }
+    };
+
+    if (options.interrupt) {
+        interruptSpeech();
+    }
+
+    speechQueue.push(item);
+    flushSpeechQueue();
 }
 
 function initRecognition() {
@@ -186,14 +299,18 @@ function initRecognition() {
     r.onend = () => stopListening();
     return r;
 }
+
 recognition = initRecognition();
 
 function startListening() {
-    if (isSpeaking) { speechSynthesis.cancel(); isSpeaking = false; }
+    if (isSpeaking) {
+        interruptSpeech();
+    }
     if (recognition && !isListening) {
         try { recognition.start(); } catch(e) {}
     }
 }
+
 function stopListening() {
     isListening = false;
     setStatus('idle', 'SISTEMI IN ATTESA');
@@ -219,7 +336,7 @@ function showReply(text) {
 
 function reply(text) {
     showReply(text);
-    speak(text);
+    speak(text, { interrupt: false });
 }
 
 // ===== Gemini =====
@@ -341,7 +458,7 @@ async function processCommand(command) {
     }
 
     if (handled) reply(response);
-    else { showReply(response); speak(response); }
+    else { showReply(response); speak(response, { interrupt: false }); }
 }
 
 // ===== Events =====
@@ -376,5 +493,10 @@ if (textInput) {
 
 if (window.speechSynthesis) {
     speechSynthesis.getVoices();
-    speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
+    speechSynthesis.onvoiceschanged = () => {
+        speechSynthesis.getVoices();
+    };
 }
+
+showReply('Sistema neurale avviato. Pronto ad assisterti, signore.');
+setNetworkState('idle');
