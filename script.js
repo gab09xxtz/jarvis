@@ -3,7 +3,7 @@
 // =====================
 
 const micBtn = document.getElementById('micBtn');
-const statusEl = document ex.getElementById('status');
+const statusEl = document.getElementById('status');
 const statusText = statusEl ? statusEl.querySelector('.status-text') : null;
 const statusCore = document.getElementById('statusCore');
 const listeningText = document.getElementById('listeningText');
@@ -54,7 +54,7 @@ function initNetwork() {
     const w = canvas.width;
     const h = canvas.height;
 
-    for (let i = 0; i < NODE_COUNT; i++) {
+    (let i = 0; i < NODE_COUNT; i++) {
         nodes.push({
             x: Math.random() * w,
             y: Math.random() * h,
@@ -137,7 +137,6 @@ function setNetworkState(state) {
     else intensity = 1;
 }
 
-// Neuron counter
 let baseNeurons = 480;
 function updateNeuronCount() {
     if (!neuronCountEl) return;
@@ -146,7 +145,6 @@ function updateNeuronCount() {
 }
 setInterval(updateNeuronCount, 2200);
 
-// Init network safely
 try {
     resizeCanvas();
     initNetwork();
@@ -156,7 +154,6 @@ try {
     console.warn('Network canvas failed:', e);
 }
 
-// ---------- Speech ----------
 function speak(text) {
     if (!window.speechSynthesis) return;
     window.speechSynthesis.cancel();
@@ -206,7 +203,6 @@ function speak(text) {
     }
 }
 
-// ---------- Recognition ----------
 function initRecognition() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
@@ -270,7 +266,6 @@ function stopListening() {
     if (listeningText) listeningText.textContent = 'Tocca il microfono e parla';
 }
 
-// ---------- UI ----------
 function setStatus(type, text) {
     if (statusEl) statusEl.className = 'status ' + type;
     if (statusText) statusText.textContent = text;
@@ -292,7 +287,6 @@ function reply(text) {
     }, 200);
 }
 
-// ---------- Notes ----------
 function createAndDownloadNote(content) {
     const now = new Date();
     const pad = (n) => String(n).padStart(2, '0');
@@ -310,7 +304,6 @@ function createAndDownloadNote(content) {
     return filename;
 }
 
-// ---------- Gemini ----------
 async function askGemini(userMessage) {
     const systemPrompt = `Sei J.A.R.V.I.S., l'assistente personale intelligente ispirato a Iron Man.
 Rispondi sempre in italiano, in modo cortese, preciso e un po' formale (usa "signore" quando appropriato).
@@ -350,7 +343,6 @@ Risposte brevi e chiare, ideali per essere lette ad alta voce (massimo 2-3 frasi
     }
 }
 
-// ---------- Helpers ----------
 function matchRoom(cmd) {
     if (/soggiorno|salotto|living/.test(cmd)) return 'soggiorno';
     if (/cucina|kitchen/.test(cmd)) return 'cucina';
@@ -373,13 +365,11 @@ function setLight(room, on) {
     return null;
 }
 
-// ---------- Commands ----------
 async function processCommand(command) {
     const cmd = command.toLowerCase().trim();
     let response = '';
     let handled = true;
 
-    // NOTE
     let noteContent = null;
     const notePatterns = [
         /^(?:scrivi\s+(?:su\s+)?note?|scrivimi\s+(?:su\s+)?note?|nota|crea\s+(?:una\s+)?nota)\s*[:\-]?\s*(.+)/i,
@@ -405,7 +395,6 @@ async function processCommand(command) {
         return;
     }
 
-    // LUCI
     if (/(accendi|attiva|apri).*(luce|luci)/.test(cmd) || /(luce|luci).*(accendi|attiva)/.test(cmd)) {
         response = setLight(matchRoom(cmd) || 'tutte', true) || 'Stanza non riconosciuta.';
     }
@@ -416,8 +405,6 @@ async function processCommand(command) {
         const accese = Object.entries(home.lights).filter(([k,v]) => v && k !== 'tutte').map(([k]) => k);
         response = accese.length ? `Luci accese: ${accese.join(', ')}.` : 'Tutte le luci sono spente.';
     }
-
-    // TEMPERATURA
     else if (/(imposta|metti|porta a).*(\d+)/.test(cmd) || /temperatura.*(a\s+)?(\d+)/.test(cmd)) {
         const m = cmd.match(/(\d{1,2})/);
         if (m) {
@@ -437,8 +424,6 @@ async function processCommand(command) {
     else if (/(che temperatura|a quanti gradi)/.test(cmd)) {
         response = `La temperatura è impostata a ${home.temperatura} gradi.`;
     }
-
-    // TV / MUSICA / VOLUME
     else if (/(accendi|apri).*(tv|televisione)/.test(cmd)) { home.tv = true; response = 'Televisione accesa.'; }
     else if (/(spegni|chiudi).*(tv|televisione)/.test(cmd)) { home.tv = false; response = 'Televisione spenta.'; }
     else if (/(metti|avvia|riproduci).*(musica|canzone)/.test(cmd)) { home.musica = true; response = 'Musica avviata.'; }
@@ -446,8 +431,6 @@ async function processCommand(command) {
     else if (/(alza|aumenta).*(volume)/.test(cmd)) { home.volume = Math.min(100, home.volume + 10); response = `Volume a ${home.volume}%.`; }
     else if (/(abbassa|diminuisci).*(volume)/.test(cmd)) { home.volume = Math.max(0, home.volume - 10); response = `Volume a ${home.volume}%.`; }
     else if (/muto|silenzia/.test(cmd)) { home.volume = 0; response = 'Audio disattivato.'; }
-
-    // TIMER
     else if (/(timer|conta).*(?:di\s+)?(\d+)/.test(cmd) || /(?:tra|fra)\s+(\d+)\s*(minuti|minuto)/.test(cmd)) {
         const m = cmd.match(/(\d+)\s*(minuti|minuto|secondi|secondo)?/);
         if (m) {
@@ -467,8 +450,6 @@ async function processCommand(command) {
         if (home.timer) { clearTimeout(home.timer); home.timer = null; response = 'Timer annullato.'; }
         else response = 'Nessun timer attivo.';
     }
-
-    // LISTA SPESA
     else if (/(aggiungi|metti).*(lista|spesa)/.test(cmd)) {
         let item = cmd.replace(/(aggiungi|metti)\s+(alla\s+)?(lista|spesa|shopping)\s*/i, '').trim();
         if (item) { home.listaSpesa.push(item); response = `Aggiunto "${item}" alla lista della spesa.`; }
@@ -477,8 +458,6 @@ async function processCommand(command) {
         response = home.listaSpesa.length ? `Lista spesa: ${home.listaSpesa.join(', ')}.` : 'La lista della spesa è vuota.';
     }
     else if (/(svuota|cancella).*(lista|spesa)/.test(cmd)) { home.listaSpesa = []; response = 'Lista della spesa svuotata.'; }
-
-    // PROMEMORIA
     else if (/(ricordami|promemoria|ricorda)\s+(.+)/i.test(cmd)) {
         const m = command.match(/(?:ricordami|promemoria|ricorda)\s+(?:di\s+)?(.+)/i);
         if (m) { home.promemoria.push(m[1].trim()); response = `Promemoria aggiunto: ${m[1].trim()}`; }
@@ -486,8 +465,6 @@ async function processCommand(command) {
     else if (/(promemoria|ricordi)/.test(cmd) && /(mostrami|dimmi|quali)/.test(cmd)) {
         response = home.promemoria.length ? `Promemoria: ${home.promemoria.join('; ')}.` : 'Nessun promemoria.';
     }
-
-    // ROUTINE
     else if (/(buongiorno|routine mattina)/.test(cmd) && !/(che ora|che giorno)/.test(cmd)) {
         setLight('tutte', false); setLight('soggiorno', true); setLight('cucina', true);
         home.temperatura = 21;
@@ -505,8 +482,6 @@ async function processCommand(command) {
         setLight('tutte', false); home.tv = false; home.musica = false;
         response = 'Modalità fuori casa attivata.';
     }
-
-    // BASE
     else if (/(ciao|salve|buongiorno|buonasera|ehi|hey)/.test(cmd) && !/modalità/.test(cmd)) {
         const h = new Date().getHours();
         if (h < 12) response = 'Buongiorno, signore. Come posso assisterla?';
@@ -526,8 +501,6 @@ async function processCommand(command) {
     else if (/(aiuto|comandi|help)/.test(cmd)) {
         response = 'Posso gestire luci, temperatura, TV, musica, timer, lista spesa, promemoria, note e rispondere a domande generali.';
     }
-
-    // GEMINI FALLBACK
     else {
         handled = false;
         response = await askGemini(command);
@@ -540,7 +513,6 @@ async function processCommand(command) {
     }
 }
 
-// ---------- Events ----------
 if (micBtn) {
     micBtn.addEventListener('click', () => {
         if (!hasGreeted) {
