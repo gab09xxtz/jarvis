@@ -5,9 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>JARVIS | Neural Interface</title>
     <link rel="stylesheet" href="style.css">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
 </head>
 <body>
     <canvas id="networkCanvas"></canvas>
@@ -24,8 +22,8 @@
         </header>
 
         <main class="main">
-            <div class="neural-info">
-                <div class="neuron-count" id="neuronCount">487 neuroni online</div>
+            <div class="neural-stage">
+                <div class="neuron-count" id="neuronCount">512 neuroni online</div>
                 <p class="listening-text" id="listeningText">Tocca il microfono e parla</p>
             </div>
 
@@ -37,27 +35,22 @@
             </div>
 
             <div class="controls">
-                <button class="mic-btn" id="micBtn" title="Parla con JARVIS">
+                <button class="mic-btn" id="micBtn">
                     <svg viewBox="0 0 24 24" fill="currentColor">
                         <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
                         <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
                     </svg>
                 </button>
-
                 <div class="input-group">
                     <input type="text" id="textInput" placeholder="Scrivi un comando o una domanda..." autocomplete="off">
                     <button class="send-btn" id="sendBtn">
-                        <svg viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
-                        </svg>
+                        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
                     </button>
                 </div>
             </div>
         </main>
 
-        <footer class="footer">
-            <p>NEURAL INTERFACE // JUST A RATHER VERY INTELLIGENT SYSTEM</p>
-        </footer>
+        <footer class="footer">NEURAL INTERFACE // J.A.R.V.I.S.</footer>
     </div>
 
     <script src="script.js"></script>
