@@ -3,53 +3,39 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JARVIS | Assistente Personale</title>
+    <title>JARVIS | Neural Interface</title>
     <link rel="stylesheet" href="style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
 </head>
 <body>
-    <div class="bg-grid"></div>
-    <div class="particles" id="particles"></div>
+    <canvas id="networkCanvas"></canvas>
 
     <div class="container">
-        <!-- Header -->
         <header class="header">
             <div class="logo">
-                <div class="arc-reactor">
-                    <div class="core"></div>
-                    <div class="ring ring-1"></div>
-                    <div class="ring ring-2"></div>
-                    <div class="ring ring-3"></div>
-                </div>
+                <div class="status-core" id="statusCore"></div>
                 <h1>J.A.R.V.I.S.</h1>
             </div>
             <div class="status" id="status">
-                <span class="status-dot"></span>
-                <span class="status-text">In attesa</span>
+                <span class="status-text">SISTEMI IN ATTESA</span>
             </div>
         </header>
 
-        <!-- Main Interface -->
         <main class="main">
-            <!-- Holographic Particle Sphere -->
-            <div class="holo-container">
-                <div class="holo-circle" id="holoCircle">
-                    <canvas id="orbCanvas" width="280" height="280"></canvas>
-                </div>
+            <div class="neural-info">
+                <div class="neuron-count" id="neuronCount">487 neuroni online</div>
                 <p class="listening-text" id="listeningText">Tocca il microfono e parla</p>
             </div>
 
-            <!-- Chat Log -->
             <div class="chat-log" id="chatLog">
                 <div class="message jarvis">
                     <span class="msg-label">JARVIS</span>
-                    <p>Sistema avviato. Pronto ad assisterti, signore.</p>
+                    <p>Sistema neurale avviato. Pronto ad assisterti, signore.</p>
                 </div>
             </div>
 
-            <!-- Controls -->
             <div class="controls">
                 <button class="mic-btn" id="micBtn" title="Parla con JARVIS">
                     <svg viewBox="0 0 24 24" fill="currentColor">
@@ -59,7 +45,7 @@
                 </button>
 
                 <div class="input-group">
-                    <input type="text" id="textInput" placeholder="Scrivi un comando..." autocomplete="off">
+                    <input type="text" id="textInput" placeholder="Scrivi un comando o una domanda..." autocomplete="off">
                     <button class="send-btn" id="sendBtn">
                         <svg viewBox="0 0 24 24" fill="currentColor">
                             <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
@@ -70,7 +56,7 @@
         </main>
 
         <footer class="footer">
-            <p>Just A Rather Very Intelligent System</p>
+            <p>NEURAL INTERFACE // JUST A RATHER VERY INTELLIGENT SYSTEM</p>
         </footer>
     </div>
 
