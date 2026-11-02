@@ -4,51 +4,36 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>JARVIS</title>
-  <link rel="stylesheet" href="style.css?v=7">
+  <link rel="stylesheet" href="style.css?v=10">
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
 </head>
 <body>
-  <canvas id="networkCanvas"></canvas>
+  <canvas id="c"></canvas>
 
-  <div class="wrap">
-    <header class="top">
-      <div class="logo">
-        <span class="dot" id="statusCore"></span>
-        <h1>J.A.R.V.I.S.</h1>
-      </div>
-      <p class="sys" id="statusText">SISTEMI IN ATTESA</p>
+  <div class="app">
+    <header>
+      <h1>J.A.R.V.I.S.</h1>
+      <span id="st">ONLINE</span>
     </header>
 
-    <main class="center">
-      <div class="stats">
-        <span><i>AI</i> <b id="aiStatus">READY</b></span>
-        <span><i>MIC</i> <b id="micStatus">STANDBY</b></span>
-        <span><i>VOICE</i> <b id="voiceStatus">READY</b></span>
-      </div>
-
-      <p class="neurons" id="neuronCount">512 neuroni online</p>
-      <p class="hint" id="listeningText">Tocca il microfono e parla</p>
-      <p class="reply" id="lastReply">Sistema neurale avviato. Pronto ad assisterti, signore.</p>
+    <main>
+      <p id="out">Pronto.</p>
     </main>
 
-    <footer class="bar">
-      <button type="button" class="mic" id="micBtn" aria-label="Microfono">
-        <svg viewBox="0 0 24 24" fill="currentColor" width="28" height="28">
+    <footer>
+      <button type="button" id="mic" aria-label="Microfono">
+        <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor">
           <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
           <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
         </svg>
       </button>
-      <div class="row">
-        <input id="textInput" type="text" placeholder="Scrivi un comando..." autocomplete="off">
-        <button type="button" class="send" id="sendBtn" aria-label="Invia">
-          <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
-            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
-          </svg>
-        </button>
-      </div>
+      <form id="f">
+        <input id="in" type="text" placeholder="Scrivi qui..." autocomplete="off">
+        <button type="submit" id="go" aria-label="Invia">➤</button>
+      </form>
     </footer>
   </div>
 
-  <script src="script.js?v=7"></script>
+  <script src="script.js?v=10"></script>
 </body>
 </html>
