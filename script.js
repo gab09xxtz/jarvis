@@ -7,7 +7,6 @@ const listeningText = document.getElementById('listeningText');
 const lastReplyEl = document.getElementById('lastReply');
 const textInput = document.getElementById('textInput');
 const sendBtn = document.getElementById('sendBtn');
-const neuronCountEl = document.getElementById('neuronCount');
 const canvas = document.getElementById('networkCanvas');
 const ctx = canvas ? canvas.getContext('2d') : null;
 
@@ -15,7 +14,6 @@ let isListening = false;
 let isSpeaking = false;
 let recognition = null;
 let hasGreeted = false;
-let intensity = 1;
 
 const WORKER_URL = 'https://jarvis-gemini.gfurceri9.workers.dev';
 const TTS_WORKER_URL = 'https://frosty-waterfall-d1b0.gfurceri9.workers.dev/';
@@ -33,123 +31,126 @@ const home = {
     temperatura: 21, volume: 40, tv: false, musica: false, timer: null, listaSpesa: [], promemoria: []
 };
 
-// ===== Neural Network =====
-let nodes = [];
-let links = [];
-const NODE_COUNT = 110;
+// ===== Core: sfera di particelle 3D che reagisce allo stato =====
+const TAU = Math.PI * 2;
+const STATES = {
+    idle:      { amp: 0.025, spin: 0.16, color: [95, 233, 255] },
+    listening: { amp: 0.070, spin: 0.38, color: [140, 255, 214] },
+    thinking:  { amp: 0.055, spin: 0.90, color: [255, 184, 82] },
+    speaking:  { amp: 0.105, spin: 0.30, color: [255, 184, 82] }
+};
+const REDUCE_MOTION = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+const SPHERE_N = 320, LINK_DIST = 0.24;
+let coreState = 'idle', coreSize = 0, lastT = 0, rotY = 0;
+let curAmp = STATES.idle.amp, curSpin = STATES.idle.spin, curColor = STATES.idle.color.slice();
+const spherePts = [], sphereEdges = [];
+const sx = new Float32Array(SPHERE_N), sy = new Float32Array(SPHERE_N), sz = new Float32Array(SPHERE_N);
+
+function buildSphere() {
+    const golden = Math.PI * (3 - Math.sqrt(5));
+    for (let i = 0; i < SPHERE_N; i++) {
+        const y = 1 - (i / (SPHERE_N - 1)) * 2, r = Math.sqrt(1 - y * y), th = golden * i;
+        spherePts.push({ x: Math.cos(th) * r, y, z: Math.sin(th) * r, ph: Math.random() * TAU });
+    }
+    for (let i = 0; i < SPHERE_N; i++) for (let j = i + 1; j < SPHERE_N; j++) {
+        const a = spherePts[i], b = spherePts[j];
+        if (Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) < LINK_DIST) sphereEdges.push([i, j]);
+    }
+}
 
 function resizeCanvas() {
-    if (!canvas) return;
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    if (!canvas || !ctx) return;
+    const size = Math.max(1, Math.round(canvas.getBoundingClientRect().width));
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    coreSize = size;
+    canvas.width = Math.round(size * dpr);
+    canvas.height = Math.round(size * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
-function initNetwork() {
-    if (!canvas || !ctx) return;
-    nodes = [];
-    links = [];
-    const w = canvas.width;
-    const h = canvas.height;
+function drawCore(now) {
+    requestAnimationFrame(drawCore);
+    if (!ctx || !coreSize) return;
+    const dt = Math.min(0.05, (now - lastT) / 1000 || 0.016);
+    lastT = now;
+    const time = now / 1000, mo = REDUCE_MOTION ? 0.3 : 1;
+    const st = STATES[coreState] || STATES.idle;
+    const k = 1 - Math.pow(0.05, dt);
+    curAmp += (st.amp * mo - curAmp) * k;
+    curSpin += (st.spin * mo - curSpin) * k;
+    for (let i = 0; i < 3; i++) curColor[i] += (st.color[i] - curColor[i]) * k;
+    rotY += dt * curSpin;
 
-    for (let i = 0; i < NODE_COUNT; i++) {
-        const angle = Math.random() * Math.PI * 2;
-        const radius = Math.random() * Math.min(w, h) * 0.4;
-        nodes.push({
-            x: w / 2 + Math.cos(angle) * radius * (0.25 + Math.random() * 0.75),
-            y: h * 0.42 + Math.sin(angle) * radius * (0.25 + Math.random() * 0.75),
-            vx: (Math.random() - 0.5) * 0.55,
-            vy: (Math.random() - 0.5) * 0.55,
-            r: 1.3 + Math.random() * 2.6,
-            pulse: Math.random() * Math.PI * 2
-        });
+    const S = coreSize, cx = S / 2, cy = S / 2, R = S * 0.34;
+    const [cr, cg, cb] = curColor.map(Math.round);
+    const rgb = a => `rgba(${cr},${cg},${cb},${a})`;
+    const env = coreState === 'speaking' ? 0.55 + 0.45 * Math.sin(time * 7.3) * Math.sin(time * 2.9 + 1.2) : 0;
+
+    ctx.clearRect(0, 0, S, S);
+    ctx.globalCompositeOperation = 'lighter';
+
+    const halo = ctx.createRadialGradient(cx, cy, R * 0.2, cx, cy, S / 2);
+    halo.addColorStop(0, rgb(0.16)); halo.addColorStop(0.55, rgb(0.05)); halo.addColorStop(1, rgb(0));
+    ctx.fillStyle = halo;
+    ctx.fillRect(0, 0, S, S);
+
+    const tilt = 0.38 + Math.sin(time * 0.35) * 0.06;
+    const cY = Math.cos(rotY), sY = Math.sin(rotY), cX = Math.cos(tilt), sX = Math.sin(tilt);
+    for (let i = 0; i < SPHERE_N; i++) {
+        const p = spherePts[i];
+        const wave = Math.sin(p.y * 6 + time * 2.4) * Math.sin(p.x * 4 - time * 1.7);
+        const d = 1 + curAmp * (0.9 * wave + 0.5 * env * Math.sin(p.ph + time * 9));
+        const x = p.x * d, y = p.y * d, z = p.z * d;
+        const x1 = x * cY + z * sY, z1 = -x * sY + z * cY;
+        const y2 = y * cX - z1 * sX, z2 = y * sX + z1 * cX;
+        const persp = 1 / (1 - z2 * 0.22);
+        sx[i] = cx + x1 * R * persp; sy[i] = cy + y2 * R * persp; sz[i] = z2;
     }
 
-    for (let i = 0; i < NODE_COUNT; i++) {
-        for (let j = i + 1; j < NODE_COUNT; j++) {
-            const dx = nodes[i].x - nodes[j].x;
-            const dy = nodes[i].y - nodes[j].y;
-            if (Math.sqrt(dx * dx + dy * dy) < 145) links.push({ a: i, b: j });
-        }
+    const bucket = z => (z > 0.35 ? 2 : z > -0.2 ? 1 : 0);
+    const edges = [new Path2D(), new Path2D(), new Path2D()];
+    for (const [a, b] of sphereEdges) {
+        const path = edges[bucket((sz[a] + sz[b]) / 2)];
+        path.moveTo(sx[a], sy[a]); path.lineTo(sx[b], sy[b]);
     }
-}
+    ctx.lineWidth = 0.8;
+    [0.10, 0.22, 0.42].forEach((a, i) => { ctx.strokeStyle = rgb(a); ctx.stroke(edges[i]); });
 
-function drawNetwork() {
-    if (!canvas || !ctx) return;
-    const w = canvas.width;
-    const h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
+    const dots = [new Path2D(), new Path2D(), new Path2D()];
+    for (let i = 0; i < SPHERE_N; i++) {
+        const r = S * 0.0035 * (0.7 + (sz[i] + 1) * 0.65);
+        const path = dots[bucket(sz[i])];
+        path.moveTo(sx[i] + r, sy[i]); path.arc(sx[i], sy[i], r, 0, TAU);
+    }
+    ctx.fillStyle = rgb(0.25); ctx.fill(dots[0]);
+    ctx.fillStyle = rgb(0.6); ctx.fill(dots[1]);
+    ctx.fillStyle = `rgba(${(cr + 255) >> 1},${(cg + 255) >> 1},${(cb + 255) >> 1},0.95)`; ctx.fill(dots[2]);
 
-    const g = ctx.createRadialGradient(w/2, h*0.42, 10, w/2, h*0.42, Math.min(w,h)*0.42);
-    g.addColorStop(0, `rgba(0,229,255,${0.1*intensity})`);
-    g.addColorStop(0.5, `rgba(0,180,255,${0.035*intensity})`);
-    g.addColorStop(1, 'transparent');
+    const pulse = 1 + 0.12 * Math.sin(time * (coreState === 'idle' ? 1.6 : 4.2)) + env * 0.18;
+    const cR = R * 0.30 * pulse * 2.2;
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, cR);
+    g.addColorStop(0, 'rgba(255,255,255,0.95)'); g.addColorStop(0.18, rgb(0.85));
+    g.addColorStop(0.5, rgb(0.22)); g.addColorStop(1, rgb(0));
     ctx.fillStyle = g;
-    ctx.fillRect(0, 0, w, h);
+    ctx.beginPath(); ctx.arc(cx, cy, cR, 0, TAU); ctx.fill();
 
-    for (const link of links) {
-        const a = nodes[link.a];
-        const b = nodes[link.b];
-        const dx = a.x - b.x;
-        const dy = a.y - b.y;
-        const dist = Math.sqrt(dx*dx + dy*dy);
-        if (dist > 155) continue;
-        const alpha = (1 - dist/155) * 0.48 * intensity;
-        ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.strokeStyle = `rgba(0,220,255,${alpha})`;
-        ctx.lineWidth = 0.9;
-        ctx.stroke();
-    }
-
-    for (const n of nodes) {
-        n.x += n.vx * intensity;
-        n.y += n.vy * intensity;
-        n.pulse += 0.045 * intensity;
-
-        const cx = w/2, cy = h*0.42;
-        const maxR = Math.min(w,h) * 0.44;
-        const dx = n.x - cx, dy = n.y - cy;
-        const d = Math.sqrt(dx*dx + dy*dy);
-        if (d > maxR) {
-            n.vx -= dx * 0.0012;
-            n.vy -= dy * 0.0012;
-        }
-
-        const glow = 0.55 + Math.sin(n.pulse) * 0.35;
-        const r = n.r * (0.9 + intensity * 0.2);
-
-        ctx.beginPath();
-        ctx.arc(n.x, n.y, r*3.6, 0, Math.PI*2);
-        ctx.fillStyle = `rgba(0,229,255,${0.1*glow*intensity})`;
-        ctx.fill();
-
-        ctx.beginPath();
-        ctx.arc(n.x, n.y, r, 0, Math.PI*2);
-        ctx.fillStyle = `rgba(195,250,255,${0.88+glow*0.12})`;
-        ctx.fill();
-    }
-
-    requestAnimationFrame(drawNetwork);
+    ctx.save();
+    ctx.translate(cx, cy); ctx.rotate(-0.32);
+    ctx.lineWidth = 1; ctx.strokeStyle = rgb(0.38);
+    ctx.setLineDash([R * 0.34, R * 0.14]); ctx.lineDashOffset = -time * R * 0.25 * mo;
+    ctx.beginPath(); ctx.ellipse(0, 0, R * 1.2, R * 0.36, 0, 0, TAU); ctx.stroke();
+    ctx.restore();
 }
 
-function setNetworkState(state) {
-    if (state === 'listening') intensity = 2.0;
-    else if (state === 'speaking') intensity = 2.5;
-    else intensity = 1;
-}
-
-setInterval(() => {
-    if (!neuronCountEl) return;
-    neuronCountEl.textContent = (495 + Math.floor(Math.random()*55) + Math.floor(intensity*18)) + ' neuroni online';
-}, 2000);
+function setNetworkState(state) { coreState = STATES[state] ? state : 'idle'; }
 
 try {
+    buildSphere();
     resizeCanvas();
-    initNetwork();
-    drawNetwork();
-    window.addEventListener('resize', () => { resizeCanvas(); initNetwork(); });
-} catch(e) { console.warn(e); }
+    if (window.ResizeObserver && canvas) new ResizeObserver(resizeCanvas).observe(canvas.parentElement);
+    else window.addEventListener('resize', resizeCanvas);
+    requestAnimationFrame(drawCore);
+} catch (e) { console.warn(e); }
 
 // ===== ElevenLabs TTS =====
 function setVoiceStatus(text) {
@@ -209,7 +210,7 @@ async function processTtsQueue() {
     const generation = ttsGeneration;
 
     isSpeaking = true;
-    setStatus('speaking', 'ELABORAZIONE VOCALE');
+    setStatus('speaking', 'Parlo');
     setNetworkState('speaking');
     setVoiceStatus('SPEAKING');
 
@@ -254,7 +255,7 @@ async function processTtsQueue() {
         ttsAbortController = null;
         ttsPlaying = false;
         isSpeaking = false;
-        setStatus('idle', 'SISTEMI IN ATTESA');
+        setStatus('idle', 'In attesa');
         setNetworkState('idle');
         setVoiceStatus('READY');
         if (listeningText) listeningText.textContent = 'Tocca il microfono e parla';
@@ -279,7 +280,7 @@ function initRecognition() {
     r.interimResults = false;
     r.onstart = () => {
         isListening = true;
-        setStatus('listening', 'IN ASCOLTO');
+        setStatus('listening', 'In ascolto');
         setNetworkState('listening');
         if (micBtn) micBtn.classList.add('listening');
         if (listeningText) listeningText.textContent = 'Ti sto ascoltando...';
@@ -308,7 +309,7 @@ function startListening() {
 }
 function stopListening() {
     isListening = false;
-    setStatus('idle', 'SISTEMI IN ATTESA');
+    setStatus('idle', 'In attesa');
     setNetworkState('idle');
     if (micBtn) micBtn.classList.remove('listening');
     if (listeningText) listeningText.textContent = 'Tocca il microfono e parla';
@@ -347,8 +348,8 @@ function reply(text) {
 // ===== Gemini =====
 async function askGemini(msg) {
     try {
-        setStatus('speaking', 'ELABORAZIONE NEURALE');
-        setNetworkState('speaking');
+        setStatus('thinking', 'Elaboro');
+        setNetworkState('thinking');
         const res = await fetch(WORKER_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -375,7 +376,7 @@ async function askGemini(msg) {
         return text ? text.trim() : 'Nessuna risposta ricevuta.';
     } catch (e) {
         console.error(e);
-        return 'Errore di connessione con i sistemi AI.';
+        return 'Non riesco a raggiungere l'assistente. Controlla la connessione e riprova.';
     }
 }
 
