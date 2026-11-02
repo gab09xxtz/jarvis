@@ -1,48 +1,54 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta name="theme-color" content="#040d18">
-    <title>JARVIS</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600&family=Instrument+Sans:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>JARVIS</title>
+  <link rel="stylesheet" href="style.css?v=7">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
 </head>
-<body data-state="idle">
-    <div class="app">
-        <header class="top">
-            <h1 class="wordmark">J.A.R.V.I.S.</h1>
-            <div class="status" id="status"><span class="status-dot"></span><span class="status-text">In attesa</span></div>
-        </header>
+<body>
+  <canvas id="networkCanvas"></canvas>
 
-        <main class="stage">
-            <div class="core"><canvas id="networkCanvas" aria-hidden="true"></canvas></div>
-            <section class="reply-zone" aria-live="polite">
-                <p class="reply" id="lastReply">Sistema neurale avviato. Pronto ad assisterti, signore.</p>
-                <p class="hint" id="listeningText">Tocca il microfono e parla</p>
-            </section>
-            <ul class="history" id="conversationHistory" aria-label="Messaggi precedenti">
-                <li class="system">Sistema neurale avviato.</li>
-            </ul>
-        </main>
+  <div class="wrap">
+    <header class="top">
+      <div class="logo">
+        <span class="dot" id="statusCore"></span>
+        <h1>J.A.R.V.I.S.</h1>
+      </div>
+      <p class="sys" id="statusText">SISTEMI IN ATTESA</p>
+    </header>
 
-        <footer class="dock">
-            <div class="field">
-                <input type="text" id="textInput" placeholder="Scrivi un comando" autocomplete="off" enterkeyhint="send" aria-label="Scrivi un comando o una domanda">
-                <button class="send-btn" id="sendBtn" aria-label="Invia">
-                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
-                </button>
-            </div>
-            <button class="mic-btn" id="micBtn" aria-label="Parla con Jarvis">
-                <svg viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
-                    <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
-                </svg>
-            </button>
-        </footer>
-    </div>
-    <script src="script.js"></script>
+    <main class="center">
+      <div class="stats">
+        <span><i>AI</i> <b id="aiStatus">READY</b></span>
+        <span><i>MIC</i> <b id="micStatus">STANDBY</b></span>
+        <span><i>VOICE</i> <b id="voiceStatus">READY</b></span>
+      </div>
+
+      <p class="neurons" id="neuronCount">512 neuroni online</p>
+      <p class="hint" id="listeningText">Tocca il microfono e parla</p>
+      <p class="reply" id="lastReply">Sistema neurale avviato. Pronto ad assisterti, signore.</p>
+    </main>
+
+    <footer class="bar">
+      <button type="button" class="mic" id="micBtn" aria-label="Microfono">
+        <svg viewBox="0 0 24 24" fill="currentColor" width="28" height="28">
+          <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+          <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+        </svg>
+      </button>
+      <div class="row">
+        <input id="textInput" type="text" placeholder="Scrivi un comando..." autocomplete="off">
+        <button type="button" class="send" id="sendBtn" aria-label="Invia">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+          </svg>
+        </button>
+      </div>
+    </footer>
+  </div>
+
+  <script src="script.js?v=7"></script>
 </body>
 </html>
