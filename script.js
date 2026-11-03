@@ -14,8 +14,9 @@
   let listening = false;
   let recognition = null;
   let intensity = 1;
+  let currentAudio = null;
 
-  // ---------- Canvas neural net ----------
+  // ---------- Canvas ----------
   let nodes = [];
   let links = [];
 
@@ -95,7 +96,7 @@
       ctx.fill();
       ctx.beginPath();
       ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(210,250,255,' + (0.9) + ')';
+      ctx.fillStyle = 'rgba(210,250,255,0.9)';
       ctx.fill();
     }
     requestAnimationFrame(frame);
@@ -105,53 +106,83 @@
   frame();
   window.addEventListener('resize', resize);
 
-  // ---------- UI ----------
-  function show(text) {
-    out.textContent = text;
-  }
-  function setSt(t) {
-    st.textContent = t;
+  function show(text) { out.textContent = text; }
+  function setSt(t) { st.textContent = t; }
+
+  function stopAudio() {
+    if (currentAudio) {
+      try { currentAudio.pause(); currentAudio.src = ''; } catch (e) {}
+      currentAudio = null;
+    }
+    if (window.speechSynthesis) speechSynthesis.cancel();
   }
 
-  // ---------- Speech (ElevenLabs then browser) ----------
+  function speakBrowser(text) {
+    return new Promise(function (resolve) {
+      if (!window.speechSynthesis) return resolve();
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = 'it-IT';
+      u.rate = 0.92;
+      u.pitch = 0.85;
+      u.volume = 1;
+      const voices = speechSynthesis.getVoices();
+      const v =
+        voices.find(function (x) { return x.lang.startsWith('it') && /google|natural|enhanced|luca|alice/i.test(x.name); }) ||
+        voices.find(function (x) { return x.lang.startsWith('it'); }) ||
+        null;
+      if (v) u.voice = v;
+      u.onend = resolve;
+      u.onerror = resolve;
+      speechSynthesis.speak(u);
+    });
+  }
+
   async function speak(text) {
+    stopAudio();
     setSt('PARLANDO');
     intensity = 2.3;
+
+    // 1) Prova ElevenLabs
     try {
       const res = await fetch(TTS, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: text, voice_id: VOICE_ID })
       });
-      if (!res.ok) throw new Error('tts ' + res.status);
+
+      if (!res.ok) throw new Error('tts http ' + res.status);
+
       const blob = await res.blob();
+      if (!blob || blob.size < 500) throw new Error('tts empty');
+
       const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      await new Promise((resolve, reject) => {
-        audio.onended = resolve;
-        audio.onerror = reject;
-        audio.play().catch(reject);
+      const audio = new Audio();
+      audio.preload = 'auto';
+      audio.src = url;
+      currentAudio = audio;
+
+      await new Promise(function (resolve, reject) {
+        var done = false;
+        function finish(err) {
+          if (done) return;
+          done = true;
+          URL.revokeObjectURL(url);
+          if (err) reject(err); else resolve();
+        }
+        audio.onended = function () { finish(); };
+        audio.onerror = function () { finish(new Error('audio error')); };
+        var p = audio.play();
+        if (p && p.catch) p.catch(function (err) { finish(err); });
       });
-      URL.revokeObjectURL(url);
     } catch (e) {
-      console.warn('TTS fallback', e);
-      await new Promise((resolve) => {
-        if (!window.speechSynthesis) return resolve();
-        speechSynthesis.cancel();
-        const u = new SpeechSynthesisUtterance(text);
-        u.lang = 'it-IT';
-        u.rate = 0.92;
-        u.pitch = 0.85;
-        const voices = speechSynthesis.getVoices();
-        const v = voices.find(v => v.lang.startsWith('it')) || null;
-        if (v) u.voice = v;
-        u.onend = resolve;
-        u.onerror = resolve;
-        speechSynthesis.speak(u);
-      });
+      console.warn('ElevenLabs non disponibile, uso voce browser:', e);
+      await speakBrowser(text);
     }
+
     intensity = 1;
     setSt('ONLINE');
+    currentAudio = null;
   }
 
   function say(text) {
@@ -159,7 +190,6 @@
     speak(text);
   }
 
-  // ---------- Gemini ----------
   async function askGemini(msg) {
     setSt('PENSO...');
     intensity = 2;
@@ -170,22 +200,43 @@
         body: JSON.stringify({
           contents: [{
             role: 'user',
-            parts: [{ text: 'Sei J.A.R.V.I.S. Rispondi in italiano, breve e formale. Max 2 frasi.\n\n' + msg }]
+            parts: [{
+              text:
+                'Sei J.A.R.V.I.S. Rispondi SEMPRE in italiano, con frasi complete. ' +
+                'Massimo 2 frasi brevi. Non troncare mai la risposta a meta. ' +
+                'Domanda: ' + msg
+            }]
           }],
-          generationConfig: { temperature: 0.7, maxOutputTokens: 200 }
+          generationConfig: {
+            temperature: 0.5,
+            maxOutputTokens: 512
+          }
         })
       });
-      const data = await res.json().catch(() => ({}));
+
+      const data = await res.json().catch(function () { return {}; });
+
       if (!res.ok || data.error) {
         const code = (data.error && data.error.code) || res.status;
         if (code === 429) return 'Quota Gemini esaurita per oggi. Riprova domani.';
-        if (code === 503) return 'Gemini sovraccarico. Riprova tra poco.';
+        if (code === 503) return 'Gemini e sovraccarico. Riprova tra poco.';
         return 'Sistemi AI non disponibili al momento.';
       }
-      const t = data && data.candidates && data.candidates[0] &&
-        data.candidates[0].content && data.candidates[0].content.parts &&
-        data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
-      return t ? t.trim() : 'Nessuna risposta.';
+
+      var t = '';
+      try {
+        t = data.candidates[0].content.parts[0].text || '';
+      } catch (e) {
+        t = '';
+      }
+      t = String(t).trim();
+      if (!t) return 'Nessuna risposta ricevuta.';
+
+      // Se sembra tagliata a meta parola, avvisa
+      if (/[a-zàèéìòù]$/i.test(t) && t.length < 12) {
+        return t + '...';
+      }
+      return t;
     } catch (e) {
       console.error(e);
       return 'Errore di connessione AI.';
@@ -195,14 +246,13 @@
     }
   }
 
-  // ---------- Local commands ----------
   const home = { temp: 21, lights: false };
 
   async function handle(raw) {
     const cmd = raw.toLowerCase().trim();
     if (!cmd) return;
 
-    if (/^(ciao|salve|ehi|hey)/.test(cmd)) {
+    if (/^(ciao|salve|ehi|hey)\b/.test(cmd)) {
       const h = new Date().getHours();
       say(h < 12 ? 'Buongiorno, signore.' : h < 18 ? 'Buon pomeriggio.' : 'Buonasera.');
       return;
@@ -225,24 +275,15 @@
       say('Luci spente.');
       return;
     }
-    if (/temperatura.*(\d+)/.test(cmd) || /imposta.*(\d+)/.test(cmd)) {
-      const m = cmd.match(/(\d{1,2})/);
-      if (m) {
-        const t = parseInt(m[1], 10);
-        if (t >= 16 && t <= 30) { home.temp = t; say('Temperatura a ' + t + ' gradi.'); return; }
-      }
-    }
     if (/grazie/.test(cmd)) {
       say('Di nulla, signore.');
       return;
     }
 
-    // Gemini for everything else
     const answer = await askGemini(raw);
     say(answer);
   }
 
-  // ---------- Form submit (FIX invio) ----------
   form.addEventListener('submit', function (e) {
     e.preventDefault();
     const text = input.value.trim();
@@ -251,7 +292,6 @@
     handle(text);
   });
 
-  // ---------- Mic ----------
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (SR) {
     recognition = new SR();
@@ -283,8 +323,9 @@
   }
 
   mic.addEventListener('click', function () {
+    stopAudio();
     if (!recognition) {
-      show('Microfono non supportato. Usa la tastiera.');
+      show('Microfono non supportato su questo browser. Usa la tastiera.');
       return;
     }
     if (listening) {
