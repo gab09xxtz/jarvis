@@ -7,10 +7,13 @@
   const input = document.getElementById('in');
 
   const GEMINI = 'https://jarvis-gemini.gfurceri9.workers.dev';
+  const TTS = 'https://frosty-waterfall-d1b0.gfurceri9.workers.dev/';
+  const VOICE_ID = 'pNInz6obpgDQGcFmaJgB';
 
   let listening = false;
   let recognition = null;
   let intensity = 1;
+  let currentAudio = null;
 
   // ---------- Canvas neurale ----------
   let nodes = [];
@@ -104,24 +107,17 @@
 
   function setSt(t) { st.textContent = t; }
 
-  // ---------- Voce GRATIS (Web Speech API) ----------
-  // Su iPhone/Safari: voci italiane di sistema
-  // Su Chrome: spesso "Google italiano"
+  function stopAudio() {
+    if (currentAudio) {
+      try { currentAudio.pause(); currentAudio.src = ''; } catch (e) {}
+      currentAudio = null;
+    }
+    if (window.speechSynthesis) speechSynthesis.cancel();
+  }
+
   function pickItalianVoice() {
     const voices = speechSynthesis.getVoices() || [];
-    const prefer = [
-      /luca/i,
-      /diego/i,
-      /cosimo/i,
-      /google.*italiano/i,
-      /italian.*male/i,
-      /it-it.*male/i,
-      /microsoft.*it/i,
-      /alice/i,
-      /elsa/i,
-      /italiano/i,
-      /^it[-_]/i
-    ];
+    const prefer = [/luca/i, /diego/i, /google.*italiano/i, /microsoft.*it/i, /alice/i, /italiano/i, /^it[-_]/i];
     for (const re of prefer) {
       const v = voices.find(function (x) { return re.test(x.name) || re.test(x.lang); });
       if (v) return v;
@@ -129,43 +125,74 @@
     return voices.find(function (x) { return x.lang && x.lang.toLowerCase().startsWith('it'); }) || null;
   }
 
-  function speak(text) {
+  function speakBrowser(text) {
     return new Promise(function (resolve) {
-      if (!window.speechSynthesis) {
-        setSt('ONLINE');
-        intensity = 1;
-        return resolve();
-      }
+      if (!window.speechSynthesis) return resolve();
       speechSynthesis.cancel();
-      setSt('PARLANDO');
-      intensity = 2.2;
-
       const u = new SpeechSynthesisUtterance(text);
       u.lang = 'it-IT';
       u.rate = 0.9;
-      u.pitch = 0.75; // un po' piu grave, stile assistente
+      u.pitch = 0.75;
       u.volume = 1;
-
-      const voice = pickItalianVoice();
-      if (voice) u.voice = voice;
-
-      u.onend = function () {
-        intensity = 1;
-        setSt('ONLINE');
-        resolve();
-      };
-      u.onerror = function () {
-        intensity = 1;
-        setSt('ONLINE');
-        resolve();
-      };
-
-      // iOS a volte ha bisogno di un piccolo delay dopo cancel
-      setTimeout(function () { speechSynthesis.speak(u); }, 40);
+      const v = pickItalianVoice();
+      if (v) u.voice = v;
+      u.onend = resolve;
+      u.onerror = resolve;
+      setTimeout(function () { speechSynthesis.speak(u); }, 30);
     });
   }
 
-  // Solo voce: nessuna risposta scritta a schermo
+  async function speakEleven(text) {
+    const res = await fetch(TTS, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text, voice_id: VOICE_ID })
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(function () { return ''; });
+      throw new Error('ElevenLabs HTTP ' + res.status + ' ' + errText.slice(0, 120));
+    }
+    const blob = await res.blob();
+    if (!blob || blob.size < 400) throw new Error('Audio vuoto');
+
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio();
+    audio.preload = 'auto';
+    audio.src = url;
+    currentAudio = audio;
+
+    await new Promise(function (resolve, reject) {
+      var done = false;
+      function finish(err) {
+        if (done) return;
+        done = true;
+        URL.revokeObjectURL(url);
+        if (err) reject(err); else resolve();
+      }
+      audio.onended = function () { finish(); };
+      audio.onerror = function () { finish(new Error('play error')); };
+      var p = audio.play();
+      if (p && p.catch) p.catch(function (e) { finish(e); });
+    });
+  }
+
+  async function speak(text) {
+    stopAudio();
+    setSt('PARLANDO');
+    intensity = 2.3;
+    try {
+      await speakEleven(text);
+    } catch (e) {
+      console.warn('ElevenLabs fallito, uso browser:', e);
+      setSt('VOCE SYS');
+      await speakBrowser(text);
+    }
+    intensity = 1;
+    setSt('ONLINE');
+    currentAudio = null;
+  }
+
+  // Solo voce, niente testo a schermo
   function say(text) {
     return speak(text);
   }
@@ -281,7 +308,7 @@
   }
 
   mic.addEventListener('click', function () {
-    if (window.speechSynthesis) speechSynthesis.cancel();
+    stopAudio();
     if (!recognition) {
       setSt('NO MIC');
       return;
@@ -293,7 +320,6 @@
     try { recognition.start(); } catch (e) {}
   });
 
-  // Precarica voci (importante su Chrome/Safari)
   if (window.speechSynthesis) {
     speechSynthesis.getVoices();
     speechSynthesis.onvoiceschanged = function () { speechSynthesis.getVoices(); };
