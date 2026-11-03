@@ -1,22 +1,18 @@
 (function () {
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('2d');
-  const out = document.getElementById('out');
   const st = document.getElementById('st');
   const mic = document.getElementById('mic');
   const form = document.getElementById('f');
   const input = document.getElementById('in');
 
   const GEMINI = 'https://jarvis-gemini.gfurceri9.workers.dev';
-  const TTS = 'https://frosty-waterfall-d1b0.gfurceri9.workers.dev/';
-  const VOICE_ID = 'pNInz6obpgDQGcFmaJgB';
 
   let listening = false;
   let recognition = null;
   let intensity = 1;
-  let currentAudio = null;
 
-  // ---------- Canvas ----------
+  // ---------- Canvas neurale ----------
   let nodes = [];
   let links = [];
 
@@ -34,16 +30,16 @@
     links = [];
     const w = window.innerWidth;
     const h = window.innerHeight;
-    const n = 90;
+    const n = 95;
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2;
-      const r = Math.random() * Math.min(w, h) * 0.36;
+      const r = Math.random() * Math.min(w, h) * 0.38;
       nodes.push({
         x: w / 2 + Math.cos(a) * r,
         y: h * 0.42 + Math.sin(a) * r * 0.9,
-        vx: (Math.random() - 0.5) * 0.6,
-        vy: (Math.random() - 0.5) * 0.6,
-        r: 1.5 + Math.random() * 2.2,
+        vx: (Math.random() - 0.5) * 0.55,
+        vy: (Math.random() - 0.5) * 0.55,
+        r: 1.4 + Math.random() * 2.3,
         p: Math.random() * 6
       });
     }
@@ -51,7 +47,7 @@
       for (let j = i + 1; j < n; j++) {
         const dx = nodes[i].x - nodes[j].x;
         const dy = nodes[i].y - nodes[j].y;
-        if (Math.hypot(dx, dy) < 130) links.push([i, j]);
+        if (Math.hypot(dx, dy) < 135) links.push([i, j]);
       }
     }
   }
@@ -61,20 +57,20 @@
     const h = window.innerHeight;
     ctx.clearRect(0, 0, w, h);
 
-    const g = ctx.createRadialGradient(w / 2, h * 0.42, 10, w / 2, h * 0.42, Math.min(w, h) * 0.4);
-    g.addColorStop(0, 'rgba(0,232,255,' + (0.12 * intensity) + ')');
+    const g = ctx.createRadialGradient(w / 2, h * 0.42, 10, w / 2, h * 0.42, Math.min(w, h) * 0.42);
+    g.addColorStop(0, 'rgba(0,232,255,' + (0.14 * intensity) + ')');
     g.addColorStop(1, 'transparent');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, w, h);
 
-    for (const [ia, ib] of links) {
-      const a = nodes[ia], b = nodes[ib];
+    for (const pair of links) {
+      const a = nodes[pair[0]], b = nodes[pair[1]];
       const d = Math.hypot(a.x - b.x, a.y - b.y);
-      if (d > 140) continue;
+      if (d > 145) continue;
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
-      ctx.strokeStyle = 'rgba(0,220,255,' + ((1 - d / 140) * 0.5 * intensity) + ')';
+      ctx.strokeStyle = 'rgba(0,220,255,' + ((1 - d / 145) * 0.55 * intensity) + ')';
       ctx.lineWidth = 1;
       ctx.stroke();
     }
@@ -83,7 +79,7 @@
       n.x += n.vx * intensity;
       n.y += n.vy * intensity;
       n.p += 0.05 * intensity;
-      const cx = w / 2, cy = h * 0.42, maxR = Math.min(w, h) * 0.4;
+      const cx = w / 2, cy = h * 0.42, maxR = Math.min(w, h) * 0.42;
       const dx = n.x - cx, dy = n.y - cy;
       if (Math.hypot(dx, dy) > maxR) {
         n.vx -= dx * 0.001;
@@ -91,12 +87,12 @@
       }
       const glow = 0.5 + Math.sin(n.p) * 0.4;
       ctx.beginPath();
-      ctx.arc(n.x, n.y, n.r * 3, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(0,232,255,' + (0.12 * glow * intensity) + ')';
+      ctx.arc(n.x, n.y, n.r * 3.2, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0,232,255,' + (0.14 * glow * intensity) + ')';
       ctx.fill();
       ctx.beginPath();
       ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(210,250,255,0.9)';
+      ctx.fillStyle = 'rgba(210,250,255,0.92)';
       ctx.fill();
     }
     requestAnimationFrame(frame);
@@ -106,88 +102,72 @@
   frame();
   window.addEventListener('resize', resize);
 
-  function show(text) { out.textContent = text; }
   function setSt(t) { st.textContent = t; }
 
-  function stopAudio() {
-    if (currentAudio) {
-      try { currentAudio.pause(); currentAudio.src = ''; } catch (e) {}
-      currentAudio = null;
+  // ---------- Voce GRATIS (Web Speech API) ----------
+  // Su iPhone/Safari: voci italiane di sistema
+  // Su Chrome: spesso "Google italiano"
+  function pickItalianVoice() {
+    const voices = speechSynthesis.getVoices() || [];
+    const prefer = [
+      /luca/i,
+      /diego/i,
+      /cosimo/i,
+      /google.*italiano/i,
+      /italian.*male/i,
+      /it-it.*male/i,
+      /microsoft.*it/i,
+      /alice/i,
+      /elsa/i,
+      /italiano/i,
+      /^it[-_]/i
+    ];
+    for (const re of prefer) {
+      const v = voices.find(function (x) { return re.test(x.name) || re.test(x.lang); });
+      if (v) return v;
     }
-    if (window.speechSynthesis) speechSynthesis.cancel();
+    return voices.find(function (x) { return x.lang && x.lang.toLowerCase().startsWith('it'); }) || null;
   }
 
-  function speakBrowser(text) {
+  function speak(text) {
     return new Promise(function (resolve) {
-      if (!window.speechSynthesis) return resolve();
+      if (!window.speechSynthesis) {
+        setSt('ONLINE');
+        intensity = 1;
+        return resolve();
+      }
       speechSynthesis.cancel();
+      setSt('PARLANDO');
+      intensity = 2.2;
+
       const u = new SpeechSynthesisUtterance(text);
       u.lang = 'it-IT';
-      u.rate = 0.92;
-      u.pitch = 0.85;
+      u.rate = 0.9;
+      u.pitch = 0.75; // un po' piu grave, stile assistente
       u.volume = 1;
-      const voices = speechSynthesis.getVoices();
-      const v =
-        voices.find(function (x) { return x.lang.startsWith('it') && /google|natural|enhanced|luca|alice/i.test(x.name); }) ||
-        voices.find(function (x) { return x.lang.startsWith('it'); }) ||
-        null;
-      if (v) u.voice = v;
-      u.onend = resolve;
-      u.onerror = resolve;
-      speechSynthesis.speak(u);
+
+      const voice = pickItalianVoice();
+      if (voice) u.voice = voice;
+
+      u.onend = function () {
+        intensity = 1;
+        setSt('ONLINE');
+        resolve();
+      };
+      u.onerror = function () {
+        intensity = 1;
+        setSt('ONLINE');
+        resolve();
+      };
+
+      // iOS a volte ha bisogno di un piccolo delay dopo cancel
+      setTimeout(function () { speechSynthesis.speak(u); }, 40);
     });
   }
 
-  async function speak(text) {
-    stopAudio();
-    setSt('PARLANDO');
-    intensity = 2.3;
-
-    // 1) Prova ElevenLabs
-    try {
-      const res = await fetch(TTS, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: text, voice_id: VOICE_ID })
-      });
-
-      if (!res.ok) throw new Error('tts http ' + res.status);
-
-      const blob = await res.blob();
-      if (!blob || blob.size < 500) throw new Error('tts empty');
-
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio();
-      audio.preload = 'auto';
-      audio.src = url;
-      currentAudio = audio;
-
-      await new Promise(function (resolve, reject) {
-        var done = false;
-        function finish(err) {
-          if (done) return;
-          done = true;
-          URL.revokeObjectURL(url);
-          if (err) reject(err); else resolve();
-        }
-        audio.onended = function () { finish(); };
-        audio.onerror = function () { finish(new Error('audio error')); };
-        var p = audio.play();
-        if (p && p.catch) p.catch(function (err) { finish(err); });
-      });
-    } catch (e) {
-      console.warn('ElevenLabs non disponibile, uso voce browser:', e);
-      await speakBrowser(text);
-    }
-
-    intensity = 1;
-    setSt('ONLINE');
-    currentAudio = null;
-  }
-
+  // Solo voce: nessuna risposta scritta a schermo
   function say(text) {
-    show(text);
-    speak(text);
+    return speak(text);
   }
 
   async function askGemini(msg) {
@@ -202,43 +182,25 @@
             role: 'user',
             parts: [{
               text:
-                'Sei J.A.R.V.I.S. Rispondi SEMPRE in italiano, con frasi complete. ' +
-                'Massimo 2 frasi brevi. Non troncare mai la risposta a meta. ' +
-                'Domanda: ' + msg
+                'Sei J.A.R.V.I.S. Rispondi SEMPRE in italiano con frasi complete. ' +
+                'Massimo 2 frasi brevi. Non troncare. Domanda: ' + msg
             }]
           }],
-          generationConfig: {
-            temperature: 0.5,
-            maxOutputTokens: 512
-          }
+          generationConfig: { temperature: 0.5, maxOutputTokens: 512 }
         })
       });
-
       const data = await res.json().catch(function () { return {}; });
-
       if (!res.ok || data.error) {
         const code = (data.error && data.error.code) || res.status;
         if (code === 429) return 'Quota Gemini esaurita per oggi. Riprova domani.';
         if (code === 503) return 'Gemini e sovraccarico. Riprova tra poco.';
         return 'Sistemi AI non disponibili al momento.';
       }
-
       var t = '';
-      try {
-        t = data.candidates[0].content.parts[0].text || '';
-      } catch (e) {
-        t = '';
-      }
+      try { t = data.candidates[0].content.parts[0].text || ''; } catch (e) {}
       t = String(t).trim();
-      if (!t) return 'Nessuna risposta ricevuta.';
-
-      // Se sembra tagliata a meta parola, avvisa
-      if (/[a-zàèéìòù]$/i.test(t) && t.length < 12) {
-        return t + '...';
-      }
-      return t;
+      return t || 'Nessuna risposta ricevuta.';
     } catch (e) {
-      console.error(e);
       return 'Errore di connessione AI.';
     } finally {
       intensity = 1;
@@ -246,42 +208,38 @@
     }
   }
 
-  const home = { temp: 21, lights: false };
-
   async function handle(raw) {
     const cmd = raw.toLowerCase().trim();
     if (!cmd) return;
 
     if (/^(ciao|salve|ehi|hey)\b/.test(cmd)) {
       const h = new Date().getHours();
-      say(h < 12 ? 'Buongiorno, signore.' : h < 18 ? 'Buon pomeriggio.' : 'Buonasera.');
+      await say(h < 12 ? 'Buongiorno, signore.' : h < 18 ? 'Buon pomeriggio.' : 'Buonasera.');
       return;
     }
     if (/che ora/.test(cmd)) {
-      say('Sono le ' + new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) + '.');
+      await say('Sono le ' + new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) + '.');
       return;
     }
     if (/chi sei|presentati/.test(cmd)) {
-      say('Sono J.A.R.V.I.S., Just A Rather Very Intelligent System.');
+      await say('Sono J.A.R.V.I.S., Just A Rather Very Intelligent System.');
       return;
     }
     if (/accendi.*luci|luci.*accendi/.test(cmd)) {
-      home.lights = true;
-      say('Luci accese.');
+      await say('Luci accese.');
       return;
     }
     if (/spegni.*luci|luci.*spegni/.test(cmd)) {
-      home.lights = false;
-      say('Luci spente.');
+      await say('Luci spente.');
       return;
     }
     if (/grazie/.test(cmd)) {
-      say('Di nulla, signore.');
+      await say('Di nulla, signore.');
       return;
     }
 
     const answer = await askGemini(raw);
-    say(answer);
+    await say(answer);
   }
 
   form.addEventListener('submit', function (e) {
@@ -323,9 +281,9 @@
   }
 
   mic.addEventListener('click', function () {
-    stopAudio();
+    if (window.speechSynthesis) speechSynthesis.cancel();
     if (!recognition) {
-      show('Microfono non supportato su questo browser. Usa la tastiera.');
+      setSt('NO MIC');
       return;
     }
     if (listening) {
@@ -335,6 +293,7 @@
     try { recognition.start(); } catch (e) {}
   });
 
+  // Precarica voci (importante su Chrome/Safari)
   if (window.speechSynthesis) {
     speechSynthesis.getVoices();
     speechSynthesis.onvoiceschanged = function () { speechSynthesis.getVoices(); };
