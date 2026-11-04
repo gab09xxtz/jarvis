@@ -1,308 +1,432 @@
 (function () {
+  'use strict';
+
   const canvas = document.getElementById('c');
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas && canvas.getContext('2d', { alpha: true });
   const st = document.getElementById('st');
   const mic = document.getElementById('mic');
   const form = document.getElementById('f');
   const input = document.getElementById('in');
 
+  if (!canvas || !ctx || !st || !mic || !form || !input) return;
+
   const GEMINI = 'https://jarvis-gemini.gfurceri9.workers.dev';
   const TTS = 'https://frosty-waterfall-d1b0.gfurceri9.workers.dev/';
   const VOICE_ID = 'pNInz6obpgDQGcFmaJgB';
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   let listening = false;
   let recognition = null;
   let intensity = 1;
   let currentAudio = null;
-
-  // ---------- Canvas neurale ----------
+  let currentAudioCleanup = null;
+  let ttsController = null;
+  let speechToken = 0;
+  let frameId = 0;
   let nodes = [];
   let links = [];
+  let lastFrame = 0;
+  let frameCount = 0;
 
+  // ---------- Canvas: meno particelle, DPR limitato e animazione sospesa in background ----------
   function resize() {
-    canvas.width = window.innerWidth * devicePixelRatio;
-    canvas.height = window.innerHeight * devicePixelRatio;
-    canvas.style.width = window.innerWidth + 'px';
-    canvas.style.height = window.innerHeight + 'px';
-    ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
-    build();
-  }
-
-  function build() {
-    nodes = [];
-    links = [];
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
     const w = window.innerWidth;
     const h = window.innerHeight;
-    const n = 95;
-    for (let i = 0; i < n; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const r = Math.random() * Math.min(w, h) * 0.38;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    buildNetwork(w, h);
+    drawFrame();
+  }
+
+  function buildNetwork(w, h) {
+    nodes = [];
+    links = [];
+    const count = Math.max(34, Math.min(58, Math.round((w * h) / 18000)));
+    const centerX = w / 2;
+    const centerY = h * 0.42;
+    const radius = Math.min(w, h) * 0.37;
+
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const distance = Math.sqrt(Math.random()) * radius;
       nodes.push({
-        x: w / 2 + Math.cos(a) * r,
-        y: h * 0.42 + Math.sin(a) * r * 0.9,
-        vx: (Math.random() - 0.5) * 0.55,
-        vy: (Math.random() - 0.5) * 0.55,
-        r: 1.4 + Math.random() * 2.3,
-        p: Math.random() * 6
+        x: centerX + Math.cos(angle) * distance,
+        y: centerY + Math.sin(angle) * distance * 0.9,
+        vx: (Math.random() - 0.5) * 0.32,
+        vy: (Math.random() - 0.5) * 0.32,
+        r: 1.2 + Math.random() * 1.8,
+        phase: Math.random() * Math.PI * 2
       });
     }
-    for (let i = 0; i < n; i++) {
-      for (let j = i + 1; j < n; j++) {
+
+    // I collegamenti vengono calcolati solo al resize, non a ogni frame.
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
         const dx = nodes[i].x - nodes[j].x;
         const dy = nodes[i].y - nodes[j].y;
-        if (Math.hypot(dx, dy) < 135) links.push([i, j]);
+        if (dx * dx + dy * dy < 145 * 145) links.push([i, j]);
       }
     }
   }
 
-  function frame() {
+  function drawFrame() {
     const w = window.innerWidth;
     const h = window.innerHeight;
     ctx.clearRect(0, 0, w, h);
 
-    const g = ctx.createRadialGradient(w / 2, h * 0.42, 10, w / 2, h * 0.42, Math.min(w, h) * 0.42);
-    g.addColorStop(0, 'rgba(0,232,255,' + (0.14 * intensity) + ')');
-    g.addColorStop(1, 'transparent');
-    ctx.fillStyle = g;
+    const centerX = w / 2;
+    const centerY = h * 0.42;
+    const radius = Math.min(w, h) * 0.4;
+    const glow = ctx.createRadialGradient(centerX, centerY, 10, centerX, centerY, radius);
+    glow.addColorStop(0, 'rgba(0,232,255,' + (0.11 * intensity) + ')');
+    glow.addColorStop(1, 'rgba(0,232,255,0)');
+    ctx.fillStyle = glow;
     ctx.fillRect(0, 0, w, h);
 
-    for (const pair of links) {
-      const a = nodes[pair[0]], b = nodes[pair[1]];
-      const d = Math.hypot(a.x - b.x, a.y - b.y);
-      if (d > 145) continue;
+    ctx.lineWidth = 1;
+    for (let i = 0; i < links.length; i++) {
+      const a = nodes[links[i][0]];
+      const b = nodes[links[i][1]];
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      if (distance > 145) continue;
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
-      ctx.strokeStyle = 'rgba(0,220,255,' + ((1 - d / 145) * 0.55 * intensity) + ')';
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(0,220,255,' + ((1 - distance / 145) * 0.38 * intensity) + ')';
       ctx.stroke();
     }
 
-    for (const n of nodes) {
+    for (let i = 0; i < nodes.length; i++) {
+      const n = nodes[i];
       n.x += n.vx * intensity;
       n.y += n.vy * intensity;
-      n.p += 0.05 * intensity;
-      const cx = w / 2, cy = h * 0.42, maxR = Math.min(w, h) * 0.42;
-      const dx = n.x - cx, dy = n.y - cy;
-      if (Math.hypot(dx, dy) > maxR) {
-        n.vx -= dx * 0.001;
-        n.vy -= dy * 0.001;
+      n.phase += 0.035 * intensity;
+
+      const dx = n.x - centerX;
+      const dy = n.y - centerY;
+      if (dx * dx + dy * dy > radius * radius) {
+        n.vx -= dx * 0.0008;
+        n.vy -= dy * 0.0008;
       }
-      const glow = 0.5 + Math.sin(n.p) * 0.4;
+
+      const pulse = 0.55 + Math.sin(n.phase) * 0.3;
       ctx.beginPath();
-      ctx.arc(n.x, n.y, n.r * 3.2, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(0,232,255,' + (0.14 * glow * intensity) + ')';
+      ctx.arc(n.x, n.y, n.r * 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0,232,255,' + (0.1 * pulse * intensity) + ')';
       ctx.fill();
       ctx.beginPath();
       ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(210,250,255,0.92)';
+      ctx.fillStyle = 'rgba(210,250,255,0.9)';
       ctx.fill();
     }
-    requestAnimationFrame(frame);
+  }
+
+  function animate(timestamp) {
+    if (document.hidden || reducedMotion) {
+      frameId = 0;
+      return;
+    }
+    // Limita il rendering a circa 30 FPS: l'effetto resta fluido ma pesa meno.
+    if (timestamp - lastFrame >= 33) {
+      drawFrame();
+      lastFrame = timestamp;
+    }
+    frameId = requestAnimationFrame(animate);
+  }
+
+  function startAnimation() {
+    if (!frameId && !document.hidden && !reducedMotion) {
+      frameId = requestAnimationFrame(animate);
+    }
+  }
+
+  function stopAnimation() {
+    if (frameId) cancelAnimationFrame(frameId);
+    frameId = 0;
   }
 
   resize();
-  frame();
-  window.addEventListener('resize', resize);
+  startAnimation();
+  window.addEventListener('resize', resize, { passive: true });
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) stopAnimation();
+    else startAnimation();
+  });
 
-  function setSt(t) { st.textContent = t; }
+  function setStatus(value) {
+    st.textContent = value;
+  }
 
   function stopAudio() {
+    speechToken++;
+    if (ttsController) {
+      ttsController.abort();
+      ttsController = null;
+    }
+    if (currentAudioCleanup) {
+      currentAudioCleanup();
+      currentAudioCleanup = null;
+    }
     if (currentAudio) {
-      try { currentAudio.pause(); currentAudio.src = ''; } catch (e) {}
+      try {
+        currentAudio.pause();
+        currentAudio.removeAttribute('src');
+        currentAudio.load();
+      } catch (_) {}
       currentAudio = null;
     }
-    if (window.speechSynthesis) speechSynthesis.cancel();
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    intensity = 1;
   }
 
   function pickItalianVoice() {
-    const voices = speechSynthesis.getVoices() || [];
-    const prefer = [/luca/i, /diego/i, /google.*italiano/i, /microsoft.*it/i, /alice/i, /italiano/i, /^it[-_]/i];
-    for (const re of prefer) {
-      const v = voices.find(function (x) { return re.test(x.name) || re.test(x.lang); });
-      if (v) return v;
+    if (!window.speechSynthesis) return null;
+    const voices = window.speechSynthesis.getVoices() || [];
+    const italian = voices.filter(function (voice) {
+      return voice.lang && voice.lang.toLowerCase().startsWith('it');
+    });
+    const preferred = [/google.*ital/i, /microsoft.*ital/i, /luca/i, /diego/i, /alice/i];
+    for (let i = 0; i < preferred.length; i++) {
+      const match = italian.find(function (voice) { return preferred[i].test(voice.name); });
+      if (match) return match;
     }
-    return voices.find(function (x) { return x.lang && x.lang.toLowerCase().startsWith('it'); }) || null;
+    return italian[0] || null;
   }
 
-  function speakBrowser(text) {
+  function speakBrowser(text, token) {
     return new Promise(function (resolve) {
-      if (!window.speechSynthesis) return resolve();
-      speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = 'it-IT';
-      u.rate = 0.9;
-      u.pitch = 0.75;
-      u.volume = 1;
-      const v = pickItalianVoice();
-      if (v) u.voice = v;
-      u.onend = resolve;
-      u.onerror = resolve;
-      setTimeout(function () { speechSynthesis.speak(u); }, 30);
+      if (!window.speechSynthesis || token !== speechToken) return resolve();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'it-IT';
+      utterance.rate = 0.94;
+      utterance.pitch = 0.9;
+      utterance.volume = 1;
+      const voice = pickItalianVoice();
+      if (voice) utterance.voice = voice;
+
+      let settled = false;
+      function finish() {
+        if (settled) return;
+        settled = true;
+        utterance.onend = null;
+        utterance.onerror = null;
+        resolve();
+      }
+      utterance.onend = finish;
+      utterance.onerror = finish;
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utterance);
     });
   }
 
-  async function speakEleven(text) {
-    const res = await fetch(TTS, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: text, voice_id: VOICE_ID })
-    });
-    if (!res.ok) {
-      const errText = await res.text().catch(function () { return ''; });
-      throw new Error('ElevenLabs HTTP ' + res.status + ' ' + errText.slice(0, 120));
-    }
-    const blob = await res.blob();
-    if (!blob || blob.size < 400) throw new Error('Audio vuoto');
+  async function speakEleven(text, token) {
+    const controller = new AbortController();
+    ttsController = controller;
+    const timeout = window.setTimeout(function () { controller.abort(); }, 25000);
 
-    const url = URL.createObjectURL(blob);
-    const audio = new Audio();
-    audio.preload = 'auto';
-    audio.src = url;
-    currentAudio = audio;
+    try {
+      const response = await fetch(TTS, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'audio/mpeg, audio/*, application/octet-stream' },
+        body: JSON.stringify({ text: text, voice_id: VOICE_ID }),
+        signal: controller.signal
+      });
 
-    await new Promise(function (resolve, reject) {
-      var done = false;
-      function finish(err) {
-        if (done) return;
-        done = true;
-        URL.revokeObjectURL(url);
-        if (err) reject(err); else resolve();
+      if (!response.ok) {
+        const detail = await response.text().catch(function () { return ''; });
+        throw new Error('Worker TTS HTTP ' + response.status + (detail ? ': ' + detail.slice(0, 160) : ''));
       }
-      audio.onended = function () { finish(); };
-      audio.onerror = function () { finish(new Error('play error')); };
-      var p = audio.play();
-      if (p && p.catch) p.catch(function (e) { finish(e); });
-    });
+
+      const contentType = (response.headers.get('content-type') || '').toLowerCase();
+      if (contentType.includes('application/json') || contentType.includes('text/')) {
+        const detail = await response.text().catch(function () { return ''; });
+        throw new Error('Il Worker non ha restituito audio: ' + detail.slice(0, 160));
+      }
+
+      const blob = await response.blob();
+      if (!blob.size || token !== speechToken) throw new Error('Risposta audio vuota o superata da una nuova richiesta');
+
+      const objectUrl = URL.createObjectURL(blob);
+      const audio = new Audio(objectUrl);
+      audio.preload = 'auto';
+      currentAudio = audio;
+
+      await new Promise(function (resolve, reject) {
+        let settled = false;
+        function finish(error) {
+          if (settled) return;
+          settled = true;
+          audio.onended = null;
+          audio.onerror = null;
+          audio.onabort = null;
+          URL.revokeObjectURL(objectUrl);
+          if (currentAudio === audio) currentAudio = null;
+          if (currentAudioCleanup === cleanup) currentAudioCleanup = null;
+          if (error) reject(error);
+          else resolve();
+        }
+        function cleanup() {
+          try { audio.pause(); } catch (_) {}
+          finish();
+        }
+        currentAudioCleanup = cleanup;
+        audio.onended = function () { finish(); };
+        audio.onerror = function () { finish(new Error('Il browser non riesce a decodificare/riprodurre l’audio ricevuto')); };
+        audio.onabort = function () { finish(); };
+
+        audio.play().catch(function (error) { finish(error); });
+      });
+    } finally {
+      window.clearTimeout(timeout);
+      if (ttsController === controller) ttsController = null;
+    }
   }
 
   async function speak(text) {
     stopAudio();
-    setSt('PARLANDO');
-    intensity = 2.3;
+    const token = speechToken;
+    setStatus('PARLANDO');
+    intensity = 1.8;
+
     try {
-      await speakEleven(text);
-    } catch (e) {
-      console.warn('ElevenLabs fallito, uso browser:', e);
-      setSt('VOCE SYS');
-      await speakBrowser(text);
+      await speakEleven(text, token);
+    } catch (error) {
+      if (token !== speechToken) return;
+      console.warn('ElevenLabs non disponibile, fallback browser:', error);
+      setStatus('VOCE SYS');
+      await speakBrowser(text, token);
     }
-    intensity = 1;
-    setSt('ONLINE');
-    currentAudio = null;
+
+    if (token === speechToken) {
+      intensity = 1;
+      setStatus('ONLINE');
+      currentAudio = null;
+    }
   }
 
-  // Solo voce, niente testo a schermo
-  function say(text) {
-    return speak(text);
-  }
+  async function askGemini(message) {
+    setStatus('PENSO...');
+    intensity = 1.5;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(function () { controller.abort(); }, 20000);
 
-  async function askGemini(msg) {
-    setSt('PENSO...');
-    intensity = 2;
     try {
-      const res = await fetch(GEMINI, {
+      const response = await fetch(GEMINI, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{
             role: 'user',
-            parts: [{
-              text:
-                'Sei J.A.R.V.I.S. Rispondi SEMPRE in italiano con frasi complete. ' +
-                'Massimo 2 frasi brevi. Non troncare. Domanda: ' + msg
-            }]
+            parts: [{ text: 'Sei J.A.R.V.I.S. Rispondi sempre in italiano, con massimo due frasi brevi e complete. Domanda: ' + message }]
           }],
-          generationConfig: { temperature: 0.5, maxOutputTokens: 512 }
-        })
+          generationConfig: { temperature: 0.5, maxOutputTokens: 256 }
+        }),
+        signal: controller.signal
       });
-      const data = await res.json().catch(function () { return {}; });
-      if (!res.ok || data.error) {
-        const code = (data.error && data.error.code) || res.status;
-        if (code === 429) return 'Quota Gemini esaurita per oggi. Riprova domani.';
-        if (code === 503) return 'Gemini e sovraccarico. Riprova tra poco.';
+      const data = await response.json().catch(function () { return {}; });
+
+      if (!response.ok || data.error) {
+        const code = data.error && data.error.code || response.status;
+        if (code === 429) return 'Quota Gemini esaurita. Riprova più tardi.';
+        if (code === 503) return 'Gemini è momentaneamente sovraccarico. Riprova tra poco.';
         return 'Sistemi AI non disponibili al momento.';
       }
-      var t = '';
-      try { t = data.candidates[0].content.parts[0].text || ''; } catch (e) {}
-      t = String(t).trim();
-      return t || 'Nessuna risposta ricevuta.';
-    } catch (e) {
+
+      const answer = data.candidates && data.candidates[0] &&
+        data.candidates[0].content && data.candidates[0].content.parts
+        ? data.candidates[0].content.parts.map(function (part) { return part.text || ''; }).join('').trim()
+        : '';
+      return answer || 'Nessuna risposta ricevuta.';
+    } catch (error) {
+      console.warn('Errore Gemini:', error);
       return 'Errore di connessione AI.';
     } finally {
+      window.clearTimeout(timeout);
       intensity = 1;
-      setSt('ONLINE');
     }
   }
 
   async function handle(raw) {
-    const cmd = raw.toLowerCase().trim();
-    if (!cmd) return;
+    const command = String(raw || '').trim();
+    const normalized = command.toLowerCase();
+    if (!normalized) return;
 
-    if (/^(ciao|salve|ehi|hey)\b/.test(cmd)) {
-      const h = new Date().getHours();
-      await say(h < 12 ? 'Buongiorno, signore.' : h < 18 ? 'Buon pomeriggio.' : 'Buonasera.');
+    stopAudio();
+
+    if (/^(ciao|salve|ehi|hey)\b/.test(normalized)) {
+      const hour = new Date().getHours();
+      await speak(hour < 12 ? 'Buongiorno, signore.' : hour < 18 ? 'Buon pomeriggio.' : 'Buonasera.');
       return;
     }
-    if (/che ora/.test(cmd)) {
-      await say('Sono le ' + new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) + '.');
+    if (/che ora/.test(normalized)) {
+      await speak('Sono le ' + new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) + '.');
       return;
     }
-    if (/chi sei|presentati/.test(cmd)) {
-      await say('Sono J.A.R.V.I.S., Just A Rather Very Intelligent System.');
+    if (/chi sei|presentati/.test(normalized)) {
+      await speak('Sono J.A.R.V.I.S., Just A Rather Very Intelligent System.');
       return;
     }
-    if (/accendi.*luci|luci.*accendi/.test(cmd)) {
-      await say('Luci accese.');
+    if (/accendi.*luci|luci.*accendi/.test(normalized)) {
+      await speak('Luci accese.');
       return;
     }
-    if (/spegni.*luci|luci.*spegni/.test(cmd)) {
-      await say('Luci spente.');
+    if (/spegni.*luci|luci.*spegni/.test(normalized)) {
+      await speak('Luci spente.');
       return;
     }
-    if (/grazie/.test(cmd)) {
-      await say('Di nulla, signore.');
+    if (/grazie/.test(normalized)) {
+      await speak('Di nulla, signore.');
       return;
     }
 
-    const answer = await askGemini(raw);
-    await say(answer);
+    const answer = await askGemini(command);
+    await speak(answer);
   }
 
-  form.addEventListener('submit', function (e) {
-    e.preventDefault();
-    const text = input.value.trim();
-    if (!text) return;
+  form.addEventListener('submit', function (event) {
+    event.preventDefault();
+    const value = input.value.trim();
+    if (!value) return;
     input.value = '';
-    handle(text);
+    handle(value);
   });
 
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (SR) {
-    recognition = new SR();
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SpeechRecognition) {
+    recognition = new SpeechRecognition();
     recognition.lang = 'it-IT';
     recognition.continuous = false;
     recognition.interimResults = false;
+
     recognition.onstart = function () {
       listening = true;
       mic.classList.add('on');
-      setSt('ASCOLTO');
-      intensity = 2;
+      setStatus('ASCOLTO');
+      intensity = 1.6;
     };
-    recognition.onresult = function (e) {
-      const t = e.results[0][0].transcript.trim();
-      if (t) handle(t);
+    recognition.onresult = function (event) {
+      const transcript = event.results && event.results[0] && event.results[0][0]
+        ? event.results[0][0].transcript.trim()
+        : '';
+      if (transcript) handle(transcript);
     };
-    recognition.onerror = function () {
+    recognition.onerror = function (event) {
+      console.warn('Riconoscimento vocale:', event.error);
       listening = false;
       mic.classList.remove('on');
-      setSt('ONLINE');
+      setStatus(event.error === 'not-allowed' ? 'MIC NEGATO' : 'ONLINE');
       intensity = 1;
     };
     recognition.onend = function () {
       listening = false;
       mic.classList.remove('on');
-      setSt('ONLINE');
+      if (st.textContent === 'ASCOLTO') setStatus('ONLINE');
       intensity = 1;
     };
   }
@@ -310,18 +434,19 @@
   mic.addEventListener('click', function () {
     stopAudio();
     if (!recognition) {
-      setSt('NO MIC');
+      setStatus('NO MIC');
       return;
     }
     if (listening) {
       recognition.stop();
       return;
     }
-    try { recognition.start(); } catch (e) {}
+    try {
+      recognition.start();
+    } catch (error) {
+      console.warn('Microfono non avviabile:', error);
+    }
   });
 
-  if (window.speechSynthesis) {
-    speechSynthesis.getVoices();
-    speechSynthesis.onvoiceschanged = function () { speechSynthesis.getVoices(); };
-  }
+  if (window.speechSynthesis) window.speechSynthesis.getVoices();
 })();
