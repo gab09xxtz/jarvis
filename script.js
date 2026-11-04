@@ -7,8 +7,9 @@
   const mic = document.getElementById('mic');
   const form = document.getElementById('f');
   const input = document.getElementById('in');
+  const chat = document.querySelector('main');
 
-  if (!canvas || !ctx || !st || !mic || !form || !input) return;
+  if (!canvas || !ctx || !st || !mic || !form || !input || !chat) return;
 
   const GEMINI = 'https://jarvis-gemini.gfurceri9.workers.dev';
   const TTS = 'https://frosty-waterfall-d1b0.gfurceri9.workers.dev/';
@@ -27,6 +28,33 @@
   let links = [];
   let lastFrame = 0;
   let frameCount = 0;
+  let timerId = null;
+  let requestId = 0;
+
+  function showMessage(role, message) {
+    const item = document.createElement('div');
+    item.className = 'message ' + (role === 'user' ? 'user' : 'assistant');
+    const label = document.createElement('span');
+    label.className = 'message-label';
+    label.textContent = role === 'user' ? 'TU' : 'JARVIS';
+    const body = document.createElement('p');
+    body.textContent = String(message || '');
+    item.append(label, body);
+    chat.appendChild(item);
+    chat.scrollTop = chat.scrollHeight;
+  }
+
+  function readLocal(key, fallback) {
+    try {
+      const value = JSON.parse(localStorage.getItem(key) || 'null');
+      return value == null ? fallback : value;
+    } catch (_) { return fallback; }
+  }
+
+  function writeLocal(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); return true; }
+    catch (_) { return false; }
+  }
 
   // ---------- Canvas: meno particelle, DPR limitato e animazione sospesa in background ----------
   function resize() {
@@ -292,7 +320,6 @@
   // ElevenLabs accetta singole richieste limitate: dividi il testo in blocchi
   // più piccoli e riproducili in sequenza, senza perdere la risposta completa.
   function splitSpeechText(text, maxLength) {
-    const words = String(text || '').match(/[\\s\\S]{1,1}/g) || [];
     const chunks = [];
     let remaining = String(text || '').trim();
     while (remaining.length > maxLength) {
@@ -314,6 +341,14 @@
     }
   }
 
+  async function speakBrowserChunks(text, token) {
+    const chunks = splitSpeechText(text, 1800);
+    for (let i = 0; i < chunks.length; i++) {
+      if (token !== speechToken) return;
+      await speakBrowser(chunks[i], token);
+    }
+  }
+
   async function speak(text) {
     stopAudio();
     const token = speechToken;
@@ -326,7 +361,7 @@
       if (token !== speechToken) return;
       console.warn('ElevenLabs non disponibile, fallback browser:', error);
       setStatus('VOCE SYS');
-      await speakBrowser(text, token);
+      await speakBrowserChunks(text, token);
     }
 
     if (token === speechToken) {
@@ -336,11 +371,11 @@
     }
   }
 
-  async function askGemini(message) {
+  async function askGemini(message, requestToken) {
     setStatus('PENSO...');
     intensity = 1.5;
     const controller = new AbortController();
-    const timeout = window.setTimeout(function () { controller.abort(); }, 20000);
+    const timeout = window.setTimeout(function () { controller.abort(); }, 45000);
 
     try {
       const response = await fetch(GEMINI, {
@@ -357,10 +392,12 @@
       });
       const data = await response.json().catch(function () { return {}; });
 
+      if (requestToken !== requestId) return '';
       if (!response.ok || data.error) {
         const code = data.error && data.error.code || response.status;
         if (code === 429) return 'Quota Gemini esaurita. Riprova più tardi.';
         if (code === 503) return 'Gemini è momentaneamente sovraccarico. Riprova tra poco.';
+        if (code === 400) return 'La richiesta non è valida. Prova a riscriverla.';
         return 'Sistemi AI non disponibili al momento.';
       }
 
@@ -373,7 +410,8 @@
       return answer;
     } catch (error) {
       console.warn('Errore Gemini:', error);
-      return 'Errore di connessione AI.';
+      if (requestToken !== requestId) return '';
+      return error && error.name === 'AbortError' ? 'La richiesta ha impiegato troppo tempo. Riprova.' : 'Errore di connessione AI. Controlla la rete e riprova.';
     } finally {
       window.clearTimeout(timeout);
       intensity = 1;
@@ -385,36 +423,98 @@
     const normalized = command.toLowerCase();
     if (!normalized) return;
 
+    const thisRequest = ++requestId;
     stopAudio();
+    showMessage('user', command);
+
+    function reply(message) {
+      if (thisRequest !== requestId) return;
+      showMessage('assistant', message);
+      speak(message);
+    }
+
+    const noteMatch = command.match(/^(?:scrivi|salva|aggiungi)\s+(?:una\s+)?nota\s*[: ]\s*(.+)$/i);
+    if (noteMatch) {
+      const notes = readLocal('jarvis_notes', []);
+      notes.push({ text: noteMatch[1].trim(), date: new Date().toLocaleString('it-IT') });
+      reply(writeLocal('jarvis_notes', notes) ? 'Nota salvata su questo dispositivo.' : 'Non riesco a salvare la nota: memoria del browser non disponibile.');
+      return;
+    }
+    if (/^(?:leggi|mostra|quali sono le)\s+note\b/i.test(normalized)) {
+      const notes = readLocal('jarvis_notes', []);
+      reply(notes.length ? 'Le tue note: ' + notes.map((n, i) => (i + 1) + '. ' + n.text).join('. ') : 'Non hai ancora note salvate.');
+      return;
+    }
+    if (/^(?:cancella|svuota)\s+(?:tutte\s+)?le\s+note\b/i.test(normalized)) {
+      reply(writeLocal('jarvis_notes', []) ? 'Note cancellate.' : 'Non riesco ad aggiornare la memoria del browser.');
+      return;
+    }
+    const shoppingMatch = command.match(/^(?:aggiungi|metti)\s+(?:alla\s+)?lista\s+(?:della\s+)?spesa\s+(?:il\s+|la\s+|lo\s+|i\s+|le\s+)?(.+)$/i);
+    if (shoppingMatch) {
+      const items = readLocal('jarvis_shopping', []);
+      items.push(shoppingMatch[1].trim());
+      reply(writeLocal('jarvis_shopping', items) ? shoppingMatch[1].trim() + ' aggiunto alla lista della spesa.' : 'Non riesco a salvare la lista sul dispositivo.');
+      return;
+    }
+    if (/^(?:cosa c'è|leggi|mostra)\s+(?:nella\s+)?lista\s+(?:della\s+)?spesa\b/i.test(normalized)) {
+      const items = readLocal('jarvis_shopping', []);
+      reply(items.length ? 'Lista della spesa: ' + items.join(', ') + '.' : 'La lista della spesa è vuota.');
+      return;
+    }
+    if (/^(?:cancella|svuota)\s+(?:la\s+)?lista\s+(?:della\s+)?spesa\b/i.test(normalized)) {
+      reply(writeLocal('jarvis_shopping', []) ? 'Lista della spesa svuotata.' : 'Non riesco ad aggiornare la lista sul dispositivo.');
+      return;
+    }
+    if (/^(?:annulla|cancella|ferma)\s+(?:il\s+)?timer\b/i.test(normalized)) {
+      if (timerId !== null) { clearTimeout(timerId); timerId = null; reply('Timer annullato.'); }
+      else reply('Non c’è nessun timer attivo.');
+      return;
+    }
+    const timerMatch = normalized.match(/timer\s+(?:di\s+)?(\d+)\s*(secondi|secondo|minuti|minuto|ore|ora)\b/);
+    if (timerMatch) {
+      const amount = Number(timerMatch[1]);
+      const unit = timerMatch[2];
+      const multiplier = unit.startsWith('ora') ? 3600000 : unit.startsWith('min') ? 60000 : 1000;
+      const duration = amount * multiplier;
+      if (!Number.isSafeInteger(amount) || amount < 1 || duration > 86400000) { reply('Imposta un timer tra 1 secondo e 24 ore.'); return; }
+      if (timerId !== null) clearTimeout(timerId);
+      timerId = window.setTimeout(function () {
+        timerId = null;
+        showMessage('assistant', 'Timer terminato.');
+        speak('Timer terminato.');
+      }, duration);
+      reply('Timer avviato per ' + amount + ' ' + unit + '.');
+      return;
+    }
 
     if (/^(ciao|salve|ehi|hey)\b/.test(normalized)) {
       const hour = new Date().getHours();
-      await speak(hour < 12 ? 'Buongiorno, signore.' : hour < 18 ? 'Buon pomeriggio.' : 'Buonasera.');
+      reply(hour < 12 ? 'Buongiorno.' : hour < 18 ? 'Buon pomeriggio.' : 'Buonasera.');
       return;
     }
     if (/che ora/.test(normalized)) {
-      await speak('Sono le ' + new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) + '.');
+      reply('Sono le ' + new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) + '.');
       return;
     }
     if (/chi sei|presentati/.test(normalized)) {
-      await speak('Sono J.A.R.V.I.S., Just A Rather Very Intelligent System.');
+      reply('Sono J.A.R.V.I.S., Just A Rather Very Intelligent System.');
       return;
     }
     if (/accendi.*luci|luci.*accendi/.test(normalized)) {
-      await speak('Luci accese.');
+      reply('Comando luci simulato: per controllarle davvero serve collegare un sistema domotico.');
       return;
     }
     if (/spegni.*luci|luci.*spegni/.test(normalized)) {
-      await speak('Luci spente.');
+      reply('Comando luci simulato: per controllarle davvero serve collegare un sistema domotico.');
       return;
     }
     if (/grazie/.test(normalized)) {
-      await speak('Di nulla, signore.');
+      reply('Di nulla.');
       return;
     }
 
-    const answer = await askGemini(command);
-    await speak(answer);
+    const answer = await askGemini(command, thisRequest);
+    if (answer && thisRequest === requestId) reply(answer);
   }
 
   form.addEventListener('submit', function (event) {
@@ -423,12 +523,14 @@
     if (!value) return;
     input.value = '';
     handle(value);
+    input.focus();
   });
 
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (SpeechRecognition) {
     recognition = new SpeechRecognition();
     recognition.lang = 'it-IT';
+    recognition.maxAlternatives = 1;
     recognition.continuous = false;
     recognition.interimResults = false;
 
@@ -448,7 +550,7 @@
       console.warn('Riconoscimento vocale:', event.error);
       listening = false;
       mic.classList.remove('on');
-      setStatus(event.error === 'not-allowed' ? 'MIC NEGATO' : 'ONLINE');
+      setStatus(event.error === 'not-allowed' ? 'MIC NEGATO' : event.error === 'no-speech' ? 'NESSUNA VOCE' : 'MIC ERRORE');
       intensity = 1;
     };
     recognition.onend = function () {
