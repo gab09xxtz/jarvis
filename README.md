@@ -69,18 +69,3 @@ https://gab09xxtz.github.io/jarvis/
 ---
 
 *Creato con ❤️*
-
-
-## Supabase
-
-Jarvis usa Supabase per account e sincronizzazione cloud delle note e della lista della spesa.
-
-- Project URL: `https://mjljfpnjgfjxgtozwnre.supabase.co`
-- Il frontend usa una **publishable key**: è pensata per essere pubblica e non concede accesso oltre le policy RLS.
-- Non inserire mai una secret key o una service-role key nel frontend o nel repository.
-- Tabelle predisposte: `notes`, `shopping_items` e `chat_messages`.
-- RLS è attiva su tutte e tre le tabelle; ogni utente autenticato può operare solo sulle proprie righe.
-- L'interfaccia permette registrazione e accesso con email/password. Se la conferma email è attiva, bisogna confermare l'indirizzo prima del primo accesso.
-- Note e lista spesa restano locali quando non si è autenticati; dopo l'accesso le nuove operazioni vengono salvate su Supabase.
-
-La cronologia chat non è ancora collegata alla tabella `chat_messages`.
