@@ -518,11 +518,18 @@
         reply('Non trovo una lista della spesa da stimare. Prima creiamone una.');
         return;
       }
-      const pricePrompt = 'Stima in modo molto approssimativo il costo totale in euro per questi prodotti in Italia: ' +
+      const pricePrompt = 'Stima il costo totale approssimativo in euro in un supermercato italiano per questi prodotti: ' +
         activeItems.join(', ') +
-        '. Considera prezzi medi da supermercato, esplicita che è una stima indicativa e non un prezzo verificato. Rispondi iniziando con: Il prezzo di tutto sarà: circa ';
+        '. Considera anche le quantità se indicate. Rispondi ESCLUSIVAMENTE con un importo o una fascia di prezzo, per esempio: 20-25 euro. Non aggiungere spiegazioni, premesse o frasi.';
       const estimate = await askGemini(pricePrompt, thisRequest);
-      if (estimate && thisRequest === requestId) reply(estimate);
+      if (estimate && thisRequest === requestId) {
+        const amount = estimate.trim()
+          .split(/[.!?\\n]/)[0]
+          .replace(/^il prezzo di tutto sarà:?\\s*(?:circa\\s*)?/i, '')
+          .replace(/^circa\\s*/i, '')
+          .trim();
+        reply('Il prezzo di tutto sarà: circa ' + amount + '. È una stima indicativa.');
+      }
       return;
     }
 
