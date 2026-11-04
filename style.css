@@ -114,3 +114,5 @@ button:disabled{opacity:.55;cursor:wait}
   #auth-form { grid-template-columns: 1fr; }
   .auth-actions { display: grid; grid-template-columns: 1fr 1fr; }
 }
+
+#auth-account[hidden], #auth-form[hidden] { display: none; }
