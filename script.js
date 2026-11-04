@@ -13,6 +13,12 @@
 
   const GEMINI = 'https://jarvis-gemini.gfurceri9.workers.dev';
   const TTS = 'https://frosty-waterfall-d1b0.gfurceri9.workers.dev/';
+  const SUPABASE_URL = 'https://mjljfpnjgfjxgtozwnre.supabase.co';
+  const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_CpsiXzUYR6CnzqJknwXm4g_rGxvS8FW';
+  const supabaseClient = window.supabase && window.supabase.createClient
+    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY)
+    : null;
+  let signedInUser = null;
   const VOICE_ID = 'pNInz6obpgDQGcFmaJgB';
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -44,6 +50,85 @@
     chat.appendChild(item);
     while (chat.children.length > 80) chat.removeChild(chat.firstChild);
     chat.scrollTop = chat.scrollHeight;
+  }
+
+  // ---------- Supabase Auth + sincronizzazione cloud ----------
+  const authForm = document.getElementById('auth-form');
+  const authEmail = document.getElementById('auth-email');
+  const authPassword = document.getElementById('auth-password');
+  const authStatus = document.getElementById('auth-status');
+  const authAccount = document.getElementById('auth-account');
+  const authUserLabel = document.getElementById('auth-user');
+  const authSignup = document.getElementById('auth-signup');
+  const authLogout = document.getElementById('auth-logout');
+
+  function authMessage(message) { if (authStatus) authStatus.textContent = message; }
+  function renderAuth(user) {
+    signedInUser = user || null;
+    if (!authForm || !authAccount) return;
+    authForm.hidden = !!signedInUser;
+    authAccount.hidden = !signedInUser;
+    if (signedInUser) {
+      authUserLabel.textContent = 'Account: ' + (signedInUser.email || 'connesso');
+      authMessage('Note e lista spesa vengono salvate nel cloud.');
+    } else authMessage('Accedi per sincronizzare note e lista spesa.');
+  }
+  async function authAction(mode) {
+    if (!supabaseClient) { authMessage('Servizio account non disponibile.'); return; }
+    const email = authEmail.value.trim(), password = authPassword.value;
+    if (!email || password.length < 6) { authMessage('Inserisci email e password (almeno 6 caratteri).'); return; }
+    authMessage('Operazione in corso...');
+    const result = mode === 'signup'
+      ? await supabaseClient.auth.signUp({ email: email, password: password })
+      : await supabaseClient.auth.signInWithPassword({ email: email, password: password });
+    if (result.error) { authMessage(result.error.message); return; }
+    if (mode === 'signup' && result.data.user && !result.data.session) {
+      authMessage('Account creato: controlla la tua email per confermare l’indirizzo, poi accedi.');
+      return;
+    }
+    renderAuth(result.data.user);
+    authMessage(mode === 'signup' ? 'Account creato e collegato.' : 'Accesso effettuato.');
+  }
+  if (supabaseClient && authForm) {
+    authForm.addEventListener('submit', function (event) { event.preventDefault(); authAction('login'); });
+    authSignup.addEventListener('click', function () { authAction('signup'); });
+    authLogout.addEventListener('click', async function () {
+      const result = await supabaseClient.auth.signOut();
+      if (result.error) authMessage(result.error.message); else renderAuth(null);
+    });
+    supabaseClient.auth.getSession().then(function (result) {
+      renderAuth(result.data && result.data.session ? result.data.session.user : null);
+    });
+    supabaseClient.auth.onAuthStateChange(function (_event, session) {
+      renderAuth(session ? session.user : null);
+    });
+  } else renderAuth(null);
+
+  async function saveNoteCloud(content) {
+    const result = await supabaseClient.from('notes').insert({ user_id: signedInUser.id, content: content });
+    if (result.error) throw result.error;
+  }
+  async function listNotesCloud() {
+    const result = await supabaseClient.from('notes').select('content,created_at').order('created_at', { ascending: true });
+    if (result.error) throw result.error;
+    return result.data.map(function (n) { return { text: n.content, date: n.created_at }; });
+  }
+  async function clearNotesCloud() {
+    const result = await supabaseClient.from('notes').delete().eq('user_id', signedInUser.id);
+    if (result.error) throw result.error;
+  }
+  async function addShoppingCloud(name) {
+    const result = await supabaseClient.from('shopping_items').insert({ user_id: signedInUser.id, name: name });
+    if (result.error) throw result.error;
+  }
+  async function listShoppingCloud() {
+    const result = await supabaseClient.from('shopping_items').select('name').order('created_at', { ascending: true });
+    if (result.error) throw result.error;
+    return result.data.map(function (item) { return item.name; });
+  }
+  async function clearShoppingCloud() {
+    const result = await supabaseClient.from('shopping_items').delete().eq('user_id', signedInUser.id);
+    if (result.error) throw result.error;
   }
 
   function readLocal(key, fallback) {
@@ -439,41 +524,58 @@
       speak(message);
     }
 
-    const noteMatch = command.match(/^(?:scrivi|salva|aggiungi)\s+(?:una\s+)?nota\s*[: ]\s*(.+)$/i);
+    const noteMatch = command.match(/^(?:scrivi|salva|aggiungi)\\s+(?:una\\s+)?nota\\s*[: ]\\s*(.+)$/i);
     if (noteMatch) {
-      const notes = readLocal('jarvis_notes', []);
-      notes.push({ text: noteMatch[1].trim(), date: new Date().toLocaleString('it-IT') });
-      reply(writeLocal('jarvis_notes', notes) ? 'Nota salvata su questo dispositivo.' : 'Non riesco a salvare la nota: memoria del browser non disponibile.');
+      const content = noteMatch[1].trim();
+      try {
+        if (signedInUser) { await saveNoteCloud(content); reply('Nota salvata nel cloud.'); }
+        else {
+          const notes = readLocal('jarvis_notes', []);
+          notes.push({ text: content, date: new Date().toLocaleString('it-IT') });
+          reply(writeLocal('jarvis_notes', notes) ? 'Nota salvata su questo dispositivo. Accedi per sincronizzarla.' : 'Non riesco a salvare la nota.');
+        }
+      } catch (error) { console.warn(error); reply('Non riesco a salvare la nota nel cloud.'); }
       return;
     }
-    if (/^(?:leggi|mostra|quali sono le)\s+note\b/i.test(normalized)) {
-      const notes = readLocal('jarvis_notes', []);
-      reply(notes.length ? 'Le tue note: ' + notes.map((n, i) => (i + 1) + '. ' + n.text).join('. ') : 'Non hai ancora note salvate.');
+    if (/^(?:leggi|mostra|quali sono le)\\s+note\\b/i.test(normalized)) {
+      try {
+        const notes = signedInUser ? await listNotesCloud() : readLocal('jarvis_notes', []);
+        reply(notes.length ? 'Le tue note: ' + notes.map((n, i) => (i + 1) + '. ' + n.text).join('. ') : 'Non hai ancora note salvate.');
+      } catch (error) { console.warn(error); reply('Non riesco a caricare le note dal cloud.'); }
       return;
     }
-    if (/^(?:cancella|svuota)\s+(?:tutte\s+)?le\s+note\b/i.test(normalized)) {
-      reply(writeLocal('jarvis_notes', []) ? 'Note cancellate.' : 'Non riesco ad aggiornare la memoria del browser.');
+    if (/^(?:cancella|svuota)\\s+(?:tutte\\s+)?le note\\b/i.test(normalized)) {
+      try {
+        if (signedInUser) { await clearNotesCloud(); reply('Note cloud cancellate.'); }
+        else reply(writeLocal('jarvis_notes', []) ? 'Note locali cancellate.' : 'Non riesco ad aggiornare la memoria del browser.');
+      } catch (error) { console.warn(error); reply('Non riesco a cancellare le note dal cloud.'); }
       return;
     }
-    const shoppingMatch = command.match(/^(?:aggiungi|metti)\s+(?:alla\s+)?lista\s+(?:della\s+)?spesa\s+(?:il\s+|la\s+|lo\s+|i\s+|le\s+)?(.+)$/i);
+    const shoppingMatch = command.match(/^(?:aggiungi|metti)\\s+(?:alla\\s+)?lista\\s+(?:della\\s+)?spesa\\s+(?:il\\s+|la\\s+|lo\\s+|i\\s+|le\\s+)?(.+)$/i);
     if (shoppingMatch) {
-      const items = readLocal('jarvis_shopping', []);
-      items.push(shoppingMatch[1].trim());
-      reply(writeLocal('jarvis_shopping', items) ? shoppingMatch[1].trim() + ' aggiunto alla lista della spesa.' : 'Non riesco a salvare la lista sul dispositivo.');
+      const name = shoppingMatch[1].trim();
+      try {
+        if (signedInUser) { await addShoppingCloud(name); reply(name + ' aggiunto alla lista cloud.'); }
+        else {
+          const items = readLocal('jarvis_shopping', []);
+          items.push(name);
+          reply(writeLocal('jarvis_shopping', items) ? name + ' aggiunto alla lista locale. Accedi per sincronizzarla.' : 'Non riesco a salvare la lista sul dispositivo.');
+        }
+      } catch (error) { console.warn(error); reply('Non riesco ad aggiungere l’elemento alla lista cloud.'); }
       return;
     }
-    if (/^(?:cosa c'è|leggi|mostra)\s+(?:nella\s+)?lista\s+(?:della\s+)?spesa\b/i.test(normalized)) {
-      const items = readLocal('jarvis_shopping', []);
-      reply(items.length ? 'Lista della spesa: ' + items.join(', ') + '.' : 'La lista della spesa è vuota.');
+    if (/^(?:cosa c'è|leggi|mostra)\\s+(?:nella\\s+)?lista\\s+(?:della\\s+)?spesa\\b/i.test(normalized)) {
+      try {
+        const items = signedInUser ? await listShoppingCloud() : readLocal('jarvis_shopping', []);
+        reply(items.length ? 'Lista della spesa: ' + items.join(', ') + '.' : 'La lista della spesa è vuota.');
+      } catch (error) { console.warn(error); reply('Non riesco a caricare la lista dal cloud.'); }
       return;
     }
-    if (/^(?:cancella|svuota)\s+(?:la\s+)?lista\s+(?:della\s+)?spesa\b/i.test(normalized)) {
-      reply(writeLocal('jarvis_shopping', []) ? 'Lista della spesa svuotata.' : 'Non riesco ad aggiornare la lista sul dispositivo.');
-      return;
-    }
-    if (/^(?:annulla|cancella|ferma)\s+(?:il\s+)?timer\b/i.test(normalized)) {
-      if (timerId !== null) { clearTimeout(timerId); timerId = null; reply('Timer annullato.'); }
-      else reply('Non c’è nessun timer attivo.');
+    if (/^(?:cancella|svuota)\\s+(?:la\\s+)?lista\\s+(?:della\\s+)?spesa\\b/i.test(normalized)) {
+      try {
+        if (signedInUser) { await clearShoppingCloud(); reply('Lista cloud svuotata.'); }
+        else reply(writeLocal('jarvis_shopping', []) ? 'Lista locale svuotata.' : 'Non riesco ad aggiornare la lista sul dispositivo.');
+      } catch (error) { console.warn(error); reply('Non riesco a svuotare la lista cloud.'); }
       return;
     }
     const timerMatch = normalized.match(/timer\s+(?:di\s+)?(\d+)\s*(secondi|secondo|minuti|minuto|ore|ora)\b/);
