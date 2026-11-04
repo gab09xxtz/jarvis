@@ -319,6 +319,7 @@
         }
         currentAudioCleanup = cleanup;
         const playbackWatchdog = window.setTimeout(function () {
+          try { audio.pause(); } catch (_) {}
           finish(new Error('Riproduzione audio bloccata o troppo lenta'));
         }, Math.min(120000, 20000 + String(text).length * 100));
         const originalFinish = finish;
