@@ -509,6 +509,23 @@
       speak(message);
     }
 
+    if (/(?:quanto|quale).*\b(?:totale|spendere|costerà|costa|prezzo)\b|\bquanto sarà\b/.test(normalized)) {
+      const latestLists = readLocal('jarvis_shopping_lists', []);
+      const activeItems = shoppingSession && shoppingSession.items.length
+        ? shoppingSession.items
+        : (latestLists.length ? latestLists[latestLists.length - 1].items : readLocal('jarvis_shopping', []));
+      if (!activeItems.length) {
+        reply('Non trovo una lista della spesa da stimare. Prima creiamone una.');
+        return;
+      }
+      const pricePrompt = 'Stima in modo molto approssimativo il costo totale in euro per questi prodotti in Italia: ' +
+        activeItems.join(', ') +
+        '. Considera prezzi medi da supermercato, esplicita che è una stima indicativa e non un prezzo verificato. Rispondi iniziando con: Il prezzo di tutto sarà: circa ';
+      const estimate = await askGemini(pricePrompt, thisRequest);
+      if (estimate && thisRequest === requestId) reply(estimate);
+      return;
+    }
+
     // Procedura lista spesa: domande e raccolta prodotti gestite localmente.
     const finishPhrase = /^(?:e|è) tutto jarvis[.! ]*$/i.test(normalized);
     const donePhrase = /^(?:e|è) tutto signore[.! ]*$/i.test(normalized);
@@ -649,23 +666,6 @@
     }
     if (/grazie/.test(normalized)) {
       reply('Di nulla.');
-      return;
-    }
-
-    if (/(?:quanto|quale).*\b(?:totale|spendere|costerà|costa|prezzo)\b|\bquanto sarà\b/.test(normalized)) {
-      const latestLists = readLocal('jarvis_shopping_lists', []);
-      const activeItems = shoppingSession && shoppingSession.items.length
-        ? shoppingSession.items
-        : (latestLists.length ? latestLists[latestLists.length - 1].items : readLocal('jarvis_shopping', []));
-      if (!activeItems.length) {
-        reply('Non trovo una lista della spesa da stimare. Prima creiamone una.');
-        return;
-      }
-      const pricePrompt = 'Stima in modo molto approssimativo il costo totale in euro per questi prodotti in Italia: ' +
-        activeItems.join(', ') +
-        '. Considera prezzi medi da supermercato, esplicita che è una stima indicativa e non un prezzo verificato. Rispondi iniziando con: Il prezzo di tutto sarà: circa ';
-      const estimate = await askGemini(pricePrompt, thisRequest);
-      if (estimate && thisRequest === requestId) reply(estimate);
       return;
     }
 
