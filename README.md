@@ -11,8 +11,11 @@ https://gab09xxtz.github.io/jarvis/
 
 - Sfera di particelle olografica che reagisce alla voce
 - Sintesi e riconoscimento vocale in italiano
-- Sistema di **note** scaricabili
-- Tanti comandi per automatizzare la casa (simulati, pronti per collegamento reale)
+- Cronologia della conversazione visibile durante la sessione
+- Note salvate localmente nel browser
+- Lista della spesa salvata localmente
+- Timer vocali fino a 24 ore
+- Comandi domotici dimostrativi (non controllano dispositivi reali)
 
 ### Comandi principali
 
@@ -47,7 +50,15 @@ https://gab09xxtz.github.io/jarvis/
 - "Esco di casa"
 
 **Note**
-- "Scrivi su note: ricorda di chiamare Marco"
+- "Scrivi una nota: ricordati di chiamare Marco"
+- "Leggi le note" / "Cancella le note"
+
+**Timer**
+- "Timer di 10 minuti" / "Annulla timer"
+
+**Lista della spesa**
+- "Aggiungi alla lista della spesa il latte"
+- "Cosa c'è nella lista della spesa?" / "Svuota la lista della spesa"
 
 ## Prossimi passi
 
