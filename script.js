@@ -30,6 +30,7 @@
   let frameCount = 0;
   let timerId = null;
   let requestId = 0;
+  let geminiController = null;
 
   function showMessage(role, message) {
     const item = document.createElement('div');
@@ -41,6 +42,7 @@
     body.textContent = String(message || '');
     item.append(label, body);
     chat.appendChild(item);
+    while (chat.children.length > 80) chat.removeChild(chat.firstChild);
     chat.scrollTop = chat.scrollHeight;
   }
 
@@ -374,7 +376,9 @@
   async function askGemini(message, requestToken) {
     setStatus('PENSO...');
     intensity = 1.5;
+    if (geminiController) geminiController.abort();
     const controller = new AbortController();
+    geminiController = controller;
     const timeout = window.setTimeout(function () { controller.abort(); }, 45000);
 
     try {
@@ -414,6 +418,7 @@
       return error && error.name === 'AbortError' ? 'La richiesta ha impiegato troppo tempo. Riprova.' : 'Errore di connessione AI. Controlla la rete e riprova.';
     } finally {
       window.clearTimeout(timeout);
+      if (geminiController === controller) geminiController = null;
       intensity = 1;
     }
   }
@@ -424,6 +429,7 @@
     if (!normalized) return;
 
     const thisRequest = ++requestId;
+    if (geminiController) geminiController.abort();
     stopAudio();
     showMessage('user', command);
 
