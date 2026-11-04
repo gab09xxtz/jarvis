@@ -17,6 +17,8 @@
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   let listening = false;
+  let recognitionStarting = false;
+  let micStartTimer = null;
   let recognition = null;
   let intensity = 1;
   let currentAudio = null;
@@ -559,6 +561,9 @@
     recognition.interimResults = false;
 
     recognition.onstart = function () {
+      if (micStartTimer !== null) window.clearTimeout(micStartTimer);
+      micStartTimer = null;
+      recognitionStarting = false;
       listening = true;
       mic.classList.add('on');
       setStatus('ASCOLTO');
@@ -571,7 +576,10 @@
       if (transcript) handle(transcript);
     };
     recognition.onerror = function (event) {
-      console.warn('Riconoscimento vocale:', event.error);
+      console.warn('Riconoscimento vocale:', event.error, event.message || '');
+      if (micStartTimer !== null) window.clearTimeout(micStartTimer);
+      micStartTimer = null;
+      recognitionStarting = false;
       listening = false;
       mic.classList.remove('on');
       const messages = {
@@ -580,12 +588,18 @@
         'audio-capture': 'MIC NON TROVATO',
         'no-speech': 'NESSUNA VOCE',
         'network': 'RETE MICROFONO',
-        'aborted': 'ASCOLTO ANNULLATO'
+        'aborted': 'ASCOLTO ANNULLATO',
+        'language-not-supported': 'LINGUA NON SUP.',
+        'phrases-not-supported': 'FUNZIONE NON SUP.'
       };
-      setStatus(messages[event.error] || 'MIC ERRORE');
+      const errorCode = String(event.error || 'sconosciuto').toUpperCase();
+      setStatus(messages[event.error] || ('MIC: ' + errorCode.slice(0, 18)));
       intensity = 1;
     };
     recognition.onend = function () {
+      if (micStartTimer !== null) window.clearTimeout(micStartTimer);
+      micStartTimer = null;
+      recognitionStarting = false;
       listening = false;
       mic.classList.remove('on');
       if (st.textContent === 'ASCOLTO') setStatus('ONLINE');
@@ -603,14 +617,30 @@
       recognition.stop();
       return;
     }
+    // Evita chiamate start() multiple mentre il browser sta ancora aprendo il microfono.
+    if (recognitionStarting) return;
     if (!window.isSecureContext) {
       setStatus('HTTPS NECESSARIO');
       return;
     }
     try {
+      recognitionStarting = true;
+      setStatus('AVVIO MIC');
       recognition.start();
+      micStartTimer = window.setTimeout(function () {
+        if (!recognitionStarting) return;
+        recognitionStarting = false;
+        listening = false;
+        mic.classList.remove('on');
+        try { recognition.abort(); } catch (_) {}
+        setStatus('MIC TIMEOUT');
+        intensity = 1;
+      }, 8000);
     } catch (error) {
       console.warn('Microfono non avviabile:', error);
+      recognitionStarting = false;
+      if (micStartTimer !== null) window.clearTimeout(micStartTimer);
+      micStartTimer = null;
       setStatus(error && error.name === 'InvalidStateError' ? 'MIC GIÀ ATTIVO' : 'RIPROVA MIC');
       listening = false;
       mic.classList.remove('on');
