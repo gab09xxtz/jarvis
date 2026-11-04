@@ -243,17 +243,27 @@
       if (voice) utterance.voice = voice;
 
       let settled = false;
+      const watchdog = window.setTimeout(function () {
+        finish();
+        try { window.speechSynthesis.cancel(); } catch (_) {}
+      }, Math.min(120000, 15000 + String(text).length * 110));
       function finish() {
         if (settled) return;
         settled = true;
+        window.clearTimeout(watchdog);
         utterance.onend = null;
         utterance.onerror = null;
         resolve();
       }
       utterance.onend = finish;
       utterance.onerror = finish;
-      window.speechSynthesis.cancel();
-      window.speechSynthesis.speak(utterance);
+      try {
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(utterance);
+      } catch (error) {
+        console.warn('Sintesi vocale browser non disponibile:', error);
+        finish();
+      }
     });
   }
 
@@ -308,6 +318,14 @@
           finish();
         }
         currentAudioCleanup = cleanup;
+        const playbackWatchdog = window.setTimeout(function () {
+          finish(new Error('Riproduzione audio bloccata o troppo lenta'));
+        }, Math.min(120000, 20000 + String(text).length * 100));
+        const originalFinish = finish;
+        finish = function (error) {
+          window.clearTimeout(playbackWatchdog);
+          originalFinish(error);
+        };
         audio.onended = function () { finish(); };
         audio.onerror = function () { finish(new Error('Il browser non riesce a decodificare/riprodurre l’audio ricevuto')); };
         audio.onabort = function () { finish(); };
@@ -555,7 +573,15 @@
       console.warn('Riconoscimento vocale:', event.error);
       listening = false;
       mic.classList.remove('on');
-      setStatus(event.error === 'not-allowed' ? 'MIC NEGATO' : event.error === 'no-speech' ? 'NESSUNA VOCE' : 'MIC ERRORE');
+      const messages = {
+        'not-allowed': 'MIC NEGATO',
+        'service-not-allowed': 'MIC NON DISP.',
+        'audio-capture': 'MIC NON TROVATO',
+        'no-speech': 'NESSUNA VOCE',
+        'network': 'RETE MICROFONO',
+        'aborted': 'ASCOLTO ANNULLATO'
+      };
+      setStatus(messages[event.error] || 'MIC ERRORE');
       intensity = 1;
     };
     recognition.onend = function () {
@@ -576,10 +602,18 @@
       recognition.stop();
       return;
     }
+    if (!window.isSecureContext) {
+      setStatus('HTTPS NECESSARIO');
+      return;
+    }
     try {
       recognition.start();
     } catch (error) {
       console.warn('Microfono non avviabile:', error);
+      setStatus(error && error.name === 'InvalidStateError' ? 'MIC GIÀ ATTIVO' : 'RIPROVA MIC');
+      listening = false;
+      mic.classList.remove('on');
+      intensity = 1;
     }
   });
 
