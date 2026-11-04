@@ -390,9 +390,9 @@
         body: JSON.stringify({
           contents: [{
             role: 'user',
-            parts: [{ text: 'Sei J.A.R.V.I.S. Rispondi sempre in italiano in modo chiaro e naturale. Puoi dare risposte complete e dettagliate, anche molto lunghe; non imporre un limite artificiale di caratteri. Domanda: ' + message }]
+            parts: [{ text: 'Sei J.A.R.V.I.S. Rispondi in italiano, in modo diretto e naturale. Sii molto conciso: di norma 1-3 frasi e massimo circa 50 parole. Evita introduzioni, ripetizioni e dettagli non richiesti. Usa elenchi solo se servono o se vengono richiesti. Se la domanda richiede spiegazioni, dai solo i punti essenziali. Domanda: ' + message }]
           }],
-          generationConfig: { temperature: 0.5, maxOutputTokens: 2048 }
+          generationConfig: { temperature: 0.4, maxOutputTokens: 512 }
         }),
         signal: controller.signal
       });
