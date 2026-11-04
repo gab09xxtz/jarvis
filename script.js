@@ -225,7 +225,7 @@
     });
   }
 
-  async function speakEleven(text, token) {
+  async function speakElevenChunk(text, token) {
     const controller = new AbortController();
     ttsController = controller;
     const timeout = window.setTimeout(function () { controller.abort(); }, 25000);
@@ -288,6 +288,32 @@
     }
   }
 
+
+  // ElevenLabs accetta singole richieste limitate: dividi il testo in blocchi
+  // più piccoli e riproducili in sequenza, senza perdere la risposta completa.
+  function splitSpeechText(text, maxLength) {
+    const words = String(text || '').match(/[\\s\\S]{1,1}/g) || [];
+    const chunks = [];
+    let remaining = String(text || '').trim();
+    while (remaining.length > maxLength) {
+      let cut = remaining.lastIndexOf(' ', maxLength);
+      if (cut < Math.floor(maxLength * 0.6)) cut = remaining.lastIndexOf('.', maxLength);
+      if (cut < Math.floor(maxLength * 0.6)) cut = maxLength;
+      chunks.push(remaining.slice(0, cut).trim());
+      remaining = remaining.slice(cut).trim();
+    }
+    if (remaining) chunks.push(remaining);
+    return chunks;
+  }
+
+  async function speakEleven(text, token) {
+    const chunks = splitSpeechText(text, 4500);
+    for (let i = 0; i < chunks.length; i++) {
+      if (token !== speechToken) return;
+      await speakElevenChunk(chunks[i], token);
+    }
+  }
+
   async function speak(text) {
     stopAudio();
     const token = speechToken;
@@ -323,9 +349,9 @@
         body: JSON.stringify({
           contents: [{
             role: 'user',
-            parts: [{ text: 'Sei J.A.R.V.I.S. Rispondi sempre in italiano in modo chiaro e naturale. Puoi dare risposte complete fino a 750 caratteri; non limitarti a due frasi. Domanda: ' + message }]
+            parts: [{ text: 'Sei J.A.R.V.I.S. Rispondi sempre in italiano in modo chiaro e naturale. Puoi dare risposte complete e dettagliate, anche molto lunghe; non imporre un limite artificiale di caratteri. Domanda: ' + message }]
           }],
-          generationConfig: { temperature: 0.5, maxOutputTokens: 512 }
+          generationConfig: { temperature: 0.5, maxOutputTokens: 2048 }
         }),
         signal: controller.signal
       });
@@ -343,12 +369,7 @@
         ? data.candidates[0].content.parts.map(function (part) { return part.text || ''; }).join('').trim()
         : '';
       if (!answer) return 'Nessuna risposta ricevuta.';
-      if (answer.length > 750) {
-        let shortened = answer.slice(0, 749);
-        const lastSpace = shortened.lastIndexOf(' ');
-        if (lastSpace > 650) shortened = shortened.slice(0, lastSpace);
-        return shortened.trimEnd() + '…';
-      }
+
       return answer;
     } catch (error) {
       console.warn('Errore Gemini:', error);
