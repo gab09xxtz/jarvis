@@ -68,3 +68,22 @@ footer{
   color:#001018;font-size:1.1rem;
   cursor:pointer;flex-shrink:0;
 }
+
+main{
+  flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;
+  display:flex;flex-direction:column;gap:10px;padding:16px 2px;
+  scrollbar-width:thin;scrollbar-color:rgba(0,232,255,.35) transparent;
+}
+.message{
+  max-width:92%;padding:10px 12px;border:1px solid rgba(0,232,255,.18);
+  border-radius:12px;background:rgba(6,16,28,.78);overflow-wrap:anywhere;
+  animation:message-in .18s ease-out;
+}
+.message.user{align-self:flex-end;border-color:rgba(0,232,255,.4);background:rgba(0,90,120,.22)}
+.message.assistant{align-self:flex-start}
+.message-label{display:block;margin-bottom:5px;color:#00e8ff;font-size:.62rem;letter-spacing:.16em}
+.message p{font-size:.86rem;line-height:1.5;white-space:pre-wrap}
+button:focus-visible,input:focus-visible{outline:2px solid #00e8ff;outline-offset:3px}
+button:disabled{opacity:.55;cursor:wait}
+@keyframes message-in{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+@media(prefers-reduced-motion:reduce){.message{animation:none}}
