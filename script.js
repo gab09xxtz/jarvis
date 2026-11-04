@@ -323,9 +323,9 @@
         body: JSON.stringify({
           contents: [{
             role: 'user',
-            parts: [{ text: 'Sei J.A.R.V.I.S. Rispondi sempre in italiano, con massimo due frasi brevi e complete. Domanda: ' + message }]
+            parts: [{ text: 'Sei J.A.R.V.I.S. Rispondi sempre in italiano in modo chiaro e naturale. Puoi dare risposte complete fino a 750 caratteri; non limitarti a due frasi. Domanda: ' + message }]
           }],
-          generationConfig: { temperature: 0.5, maxOutputTokens: 256 }
+          generationConfig: { temperature: 0.5, maxOutputTokens: 512 }
         }),
         signal: controller.signal
       });
@@ -342,7 +342,14 @@
         data.candidates[0].content && data.candidates[0].content.parts
         ? data.candidates[0].content.parts.map(function (part) { return part.text || ''; }).join('').trim()
         : '';
-      return answer || 'Nessuna risposta ricevuta.';
+      if (!answer) return 'Nessuna risposta ricevuta.';
+      if (answer.length > 750) {
+        let shortened = answer.slice(0, 749);
+        const lastSpace = shortened.lastIndexOf(' ');
+        if (lastSpace > 650) shortened = shortened.slice(0, lastSpace);
+        return shortened.trimEnd() + '…';
+      }
+      return answer;
     } catch (error) {
       console.warn('Errore Gemini:', error);
       return 'Errore di connessione AI.';
