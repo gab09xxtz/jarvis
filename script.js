@@ -33,6 +33,7 @@
   let timerId = null;
   let requestId = 0;
   let geminiController = null;
+  let shoppingSession = null;
 
   function showMessage(role, message) {
     const item = document.createElement('div');
@@ -446,6 +447,52 @@
     }
   }
 
+
+  function downloadShoppingList(session) {
+    const lines = [
+      'JARVIS - LISTA DELLA SPESA',
+      'Data: ' + session.date,
+      'Persone: ' + session.people,
+      'Occasione/pasti: ' + session.occasion,
+      '',
+      'PRODOTTI / INGREDIENTI'
+    ];
+    session.items.forEach(function (item, index) { lines.push((index + 1) + '. ' + item); });
+    lines.push('', 'Creato con JARVIS');
+    const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'lista-spesa-' + session.date.replace(/\//g, '-') + '.txt';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
+  function finishShoppingList() {
+    if (!shoppingSession) return;
+    const completed = shoppingSession;
+    const saved = readLocal('jarvis_shopping_lists', []);
+    saved.push(completed);
+    writeLocal('jarvis_shopping_lists', saved);
+    shoppingSession = null;
+    const message = 'Ottimo, signore. Questa è la sua lista della spesa. Avvio il download.';
+    showMessage('assistant', message);
+    speak(message);
+    downloadShoppingList(completed);
+  }
+
+  function addShoppingItems(raw) {
+    if (!shoppingSession) return;
+    const parts = String(raw).split(/[,;\n]+/).map(function (item) { return item.trim(); }).filter(Boolean);
+    parts.forEach(function (item) {
+      if (!shoppingSession.items.some(function (existing) { return existing.toLowerCase() === item.toLowerCase(); })) {
+        shoppingSession.items.push(item);
+      }
+    });
+  }
+
   async function handle(raw) {
     const command = String(raw || '').trim();
     const normalized = command.toLowerCase();
@@ -460,6 +507,72 @@
       if (thisRequest !== requestId) return;
       showMessage('assistant', message);
       speak(message);
+    }
+
+    // Procedura lista spesa: domande e raccolta prodotti gestite localmente.
+    const finishPhrase = /^(?:e|è) tutto jarvis[.! ]*$/i.test(normalized);
+    const donePhrase = /^(?:e|è) tutto signore[.! ]*$/i.test(normalized);
+    if (shoppingSession) {
+      if (finishPhrase) {
+        if (shoppingSession.items.length) finishShoppingList();
+        else reply('Non ho ancora prodotti nella lista. Mi dica cosa devo aggiungere.');
+        return;
+      }
+      if (shoppingSession.stage === 'people') {
+        const people = normalized.match(/\b(\d{1,2})\b/);
+        if (!people || Number(people[1]) < 1 || Number(people[1]) > 30) {
+          reply('Per quante persone preparo la lista? Mi dica un numero da 1 a 30.');
+          return;
+        }
+        shoppingSession.people = Number(people[1]);
+        shoppingSession.stage = 'occasion';
+        reply('Perfetto. Per quali pasti o occasioni preparo la spesa? Per esempio colazioni, pranzi e cene oppure una festa.');
+        return;
+      }
+      if (shoppingSession.stage === 'occasion') {
+        shoppingSession.occasion = command;
+        shoppingSession.stage = 'items';
+        reply('Ricevuto. Quali ingredienti o prodotti devo inserire? Può elencarli separati da virgole e indicare anche le quantità.');
+        return;
+      }
+      if (shoppingSession.stage === 'items') {
+        if (donePhrase) {
+          if (!shoppingSession.items.length) {
+            reply('Non ho ancora prodotti nella lista. Mi dica cosa devo aggiungere.');
+            return;
+          }
+          shoppingSession.stage = 'confirm';
+          reply('Ho preparato la lista con ' + shoppingSession.items.length + ' prodotti. È tutto, signore? Se conferma, dica “è tutto Jarvis”.');
+          return;
+        }
+        addShoppingItems(command);
+        reply('Aggiunto. Al momento ho ' + shoppingSession.items.length + ' prodotti. Vuole aggiungere altro o indicare altre quantità? Quando ha finito dica “è tutto signore”.');
+        return;
+      }
+      if (shoppingSession.stage === 'confirm') {
+        if (/\b(no|aggiungi|manca|modifica)\b/.test(normalized)) {
+          shoppingSession.stage = 'items';
+          reply('Certamente. Quali prodotti aggiungo o modifico?');
+          return;
+        }
+        addShoppingItems(command);
+        shoppingSession.stage = 'items';
+        reply('Ho aggiornato la lista. Se ha finito, dica “è tutto signore”.');
+        return;
+      }
+    }
+
+    const createListMatch = normalized.match(/^(?:jarvis[, ]*)?(?:creami|crea|prepara|fammi)\s+(?:una\s+)?lista(?:\s+della\s+spesa)?\s+(?:per\s+)?(?:il\s+giorno\s+)?(\d{2}\/\d{2}\/\d{4})[.! ]*$/i);
+    if (createListMatch) {
+      const dateParts = createListMatch[1].split('/').map(Number);
+      const date = new Date(dateParts[2], dateParts[1] - 1, dateParts[0]);
+      if (date.getFullYear() !== dateParts[2] || date.getMonth() !== dateParts[1] - 1 || date.getDate() !== dateParts[0]) {
+        reply('La data non è valida. Mi dica una data nel formato giorno/mese/anno.');
+        return;
+      }
+      shoppingSession = { date: createListMatch[1], people: null, occasion: '', items: [], stage: 'people' };
+      reply('Certamente, signore. Creo una lista per il ' + shoppingSession.date + '. Per quante persone devo calcolare la spesa?');
+      return;
     }
 
     const noteMatch = command.match(/^(?:scrivi|salva|aggiungi)\\s+(?:una\\s+)?nota\\s*[: ]\\s*(.+)$/i);
@@ -536,6 +649,23 @@
     }
     if (/grazie/.test(normalized)) {
       reply('Di nulla.');
+      return;
+    }
+
+    if (/(?:quanto|quale).*\b(?:totale|spendere|costerà|costa|prezzo)\b|\bquanto sarà\b/.test(normalized)) {
+      const latestLists = readLocal('jarvis_shopping_lists', []);
+      const activeItems = shoppingSession && shoppingSession.items.length
+        ? shoppingSession.items
+        : (latestLists.length ? latestLists[latestLists.length - 1].items : readLocal('jarvis_shopping', []));
+      if (!activeItems.length) {
+        reply('Non trovo una lista della spesa da stimare. Prima creiamone una.');
+        return;
+      }
+      const pricePrompt = 'Stima in modo molto approssimativo il costo totale in euro per questi prodotti in Italia: ' +
+        activeItems.join(', ') +
+        '. Considera prezzi medi da supermercato, esplicita che è una stima indicativa e non un prezzo verificato. Rispondi iniziando con: Il prezzo di tutto sarà: circa ';
+      const estimate = await askGemini(pricePrompt, thisRequest);
+      if (estimate && thisRequest === requestId) reply(estimate);
       return;
     }
 
