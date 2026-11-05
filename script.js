@@ -540,7 +540,7 @@
 
     // Promemoria relativi: "fra 10 minuti", "tra 2 ore",
     // anche dettati come "e ricordami di ...".
-    const relative = text.match(/^(?:jarvis[, ]*)?(?:fammi|creami|crea|imposta)\\s+(?:(?:questo|un)\\s+)?promemori[ae]\\s+(?:fra|tra)\\s+(\\d+)\\s*(secondi?|minuti?|ore?|giorni?)\\b([\\s\\S]*)$/i);
+    const relative = text.match(/^(?:jarvis[, ]*)?(?:fammi|creami|crea|imposta)\s+(?:(?:questo|un)\s+)?promemori[ae]\s+(?:fra|tra)\s+(\d+)\s*(secondi?|minuti?|ore?|giorni?)\b([\s\S]*)$/i);
     if (relative) {
       const amount = Number(relative[1]);
       const unit = relative[2].toLowerCase();
@@ -552,8 +552,8 @@
         throw new Error('Intervallo non valido. Usa un tempo da 1 secondo a 365 giorni.');
       }
       let body = relative[3].trim();
-      body = body.replace(/^(?:[,;:]?\\s*)(?:e\\s+)?(?:ricordami(?:\\s+di)?|di)\\s+/i, '');
-      body = body.replace(/^\\s*[:,-]\\s*/, '').trim();
+      body = body.replace(/^(?:[,;:]?\s*)(?:e\s+)?(?:ricordami(?:\s+di)?|di)\s+/i, '');
+      body = body.replace(/^\s*[:,-]\s*/, '').trim();
       if (!body) {
         throw new Error('Manca il testo del promemoria. Per esempio: “fammi un promemoria fra 10 minuti e ricordami di controllare la pasta”.');
       }
@@ -567,7 +567,7 @@
       };
     }
 
-    const match = text.match(/^(?:jarvis[, ]*)?(?:fammi|creami|crea|imposta)\\s+(?:(?:questo|un)\\s+)?promemori[ae]\\s+per\\s+(?:il\\s+giorno\\s+)?(\\d{2}\\/\\d{2}\\/\\d{4})(?:\\s+(?:alle|ore)\\s+(\\d{1,2}:\\d{2}))?\\s*:\\s*(.+)$/i);
+    const match = text.match(/^(?:jarvis[, ]*)?(?:fammi|creami|crea|imposta)\s+(?:(?:questo|un)\s+)?promemori[ae]\s+per\s+(?:il\s+giorno\s+)?(\d{2}\/\d{2}\/\d{4})(?:\s+(?:alle|ore)\s+(\d{1,2}:\d{2}))?\s*:\s*(.+)$/i);
     if (!match) return null;
     const parts = match[1].split('/').map(Number);
     const time = (match[2] || '09:00').split(':').map(Number);
