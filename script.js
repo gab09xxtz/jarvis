@@ -540,7 +540,7 @@
 
     // Promemoria relativi: "fra 10 minuti", "tra 2 ore",
     // anche dettati come "e ricordami di ...".
-    const relative = text.match(/^(?:jarvis[, ]*)?(?:fammi|creami|crea|imposta)\s+(?:(?:questo|un)\s+)?promemori[ae]\s+(?:fra|tra)\s+(\d+)\s*(secondi?|minuti?|ore?|giorni?)\b([\s\S]*)$/i);
+    const relative = text.match(/^(?:jarvis[, ]*)?(?:fammi|creami|crea|imposta)\s+(?:(?:questo|un)\s+)?promemori[ae]\s+(?:fra|tra)\s+(\d+)\s*(second[oi]|minut[oi]|or[ae]|giorn[oi])\b([\s\S]*)$/i);
     if (relative) {
       const amount = Number(relative[1]);
       const unit = relative[2].toLowerCase();
