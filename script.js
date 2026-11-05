@@ -493,6 +493,74 @@
     });
   }
 
+
+  // ---------- Promemoria email tramite Worker Cloudflare ----------
+  const REMINDER_WORKER = 'https://jarvis-reminders.gfurceri9.workers.dev';
+
+  function reminderSession() {
+    try { return sessionStorage.getItem('jarvis_reminder_session') || ''; }
+    catch (_) { return ''; }
+  }
+
+  (function consumeReminderSession() {
+    try {
+      const match = window.location.hash.match(/(?:^#|&)jarvis_session=([^&]+)/);
+      if (!match) return;
+      const token = decodeURIComponent(match[1]);
+      if (token) {
+        sessionStorage.setItem('jarvis_reminder_session', token);
+        history.replaceState(null, document.title, window.location.pathname + window.location.search);
+        setStatus('GMAIL COLLEGATO');
+        showMessage('assistant', 'Gmail collegato correttamente. Ora posso creare promemoria via email.');
+      }
+    } catch (error) {
+      console.warn('Impossibile salvare la sessione promemoria:', error);
+    }
+  })();
+
+  async function reminderRequest(path, options) {
+    const token = reminderSession();
+    if (!token) throw new Error('Gmail non è collegato. Dica “collega Gmail” per iniziare.');
+    const response = await fetch(REMINDER_WORKER + path, Object.assign({}, options || {}, {
+      headers: Object.assign({ 'Authorization': 'Bearer ' + token }, options && options.headers || {})
+    }));
+    const data = await response.json().catch(function () { return {}; });
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        try { sessionStorage.removeItem('jarvis_reminder_session'); } catch (_) {}
+        throw new Error('La sessione Gmail è scaduta. Dica “collega Gmail” per riconnetterlo.');
+      }
+      throw new Error(data.error || data.message || 'Errore del servizio promemoria (' + response.status + ').');
+    }
+    return data;
+  }
+
+  function parseReminderCommand(command) {
+    const match = String(command).match(/^(?:jarvis[, ]*)?(?:fammi|creami|crea|imposta)\s+(?:questo\s+)?promemoria\s+per\s+(?:il\s+giorno\s+)?(\d{2}\/\d{2}\/\d{4})(?:\s+(?:alle|ore)\s+(\d{1,2}:\d{2}))?\s*:\s*(.+)$/i);
+    if (!match) return null;
+    const parts = match[1].split('/').map(Number);
+    const time = (match[2] || '09:00').split(':').map(Number);
+    const date = new Date(parts[2], parts[1] - 1, parts[0], time[0], time[1], 0, 0);
+    if (date.getFullYear() !== parts[2] || date.getMonth() !== parts[1] - 1 ||
+        date.getDate() !== parts[0] || time[0] > 23 || time[1] > 59) {
+      throw new Error('Data o orario non validi. Usa GG/MM/AAAA e, facoltativamente, HH:MM.');
+    }
+    if (date.getTime() < Date.now() + 60000) {
+      throw new Error('La data e l’orario devono essere almeno un minuto nel futuro.');
+    }
+    return { body: match[3].trim(), due_at: date.toISOString(), date: match[1], time: match[2] || '09:00' };
+  }
+
+  async function listEmailReminders() {
+    const data = await reminderRequest('/reminders');
+    const rows = Array.isArray(data) ? data : (data.reminders || data.results || []);
+    if (!rows.length) return 'Non hai promemoria email in programma.';
+    return 'I tuoi promemoria: ' + rows.slice(0, 10).map(function (item) {
+      const when = item.due_at ? new Date(item.due_at).toLocaleString('it-IT') : 'data non disponibile';
+      return when + ': ' + (item.body || 'Promemoria');
+    }).join('. ');
+  }
+
   async function handle(raw) {
     const command = String(raw || '').trim();
     const normalized = command.toLowerCase();
@@ -507,6 +575,45 @@
       if (thisRequest !== requestId) return;
       showMessage('assistant', message);
       speak(message);
+    }
+
+
+    if (/^(?:collega|connetti)\s+(?:gmail|email)\b/i.test(normalized)) {
+      if (reminderSession()) {
+        reply('Gmail risulta già collegato. Può chiedermi direttamente di creare un promemoria.');
+      } else {
+        reply('Apro Google per collegare Gmail. Completi l’autorizzazione nella pagina Google.');
+        window.setTimeout(function () { window.location.href = REMINDER_WORKER + '/oauth/start'; }, 700);
+      }
+      return;
+    }
+    if (/^(?:disconnetti|scollega)\s+(?:gmail|email)\b/i.test(normalized)) {
+      try { sessionStorage.removeItem('jarvis_reminder_session'); } catch (_) {}
+      reply('Gmail scollegato da questa scheda.');
+      return;
+    }
+    if (/^(?:mostra|leggi|elenca)\s+(?:i\s+)?promemoria(?:\s+email)?\b/i.test(normalized)) {
+      try { reply(await listEmailReminders()); }
+      catch (error) { reply(error.message || 'Non riesco a leggere i promemoria.'); }
+      return;
+    }
+    if (/promemoria/.test(normalized) && /(?:fammi|creami|crea|imposta)/.test(normalized)) {
+      try {
+        const reminder = parseReminderCommand(command);
+        if (!reminder) {
+          reply('Per creare un promemoria scriva: “fammi questo promemoria per il giorno 06/11/2026 alle 09:00: testo”. Se omette l’orario, userò le 09:00.');
+          return;
+        }
+        await reminderRequest('/reminders', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ body: reminder.body, due_at: reminder.due_at })
+        });
+        reply('Promemoria salvato per il ' + reminder.date + ' alle ' + reminder.time + '. Riceverà un’email quando sarà il momento.');
+      } catch (error) {
+        reply(error.message || 'Non sono riuscito a salvare il promemoria.');
+      }
+      return;
     }
 
     if (/(?:quanto|quale).*\b(?:totale|spendere|costerà|costa|prezzo)\b|\bquanto sarà\b/.test(normalized)) {
