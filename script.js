@@ -536,7 +536,38 @@
   }
 
   function parseReminderCommand(command) {
-    const match = String(command).match(/^(?:jarvis[, ]*)?(?:fammi|creami|crea|imposta)\s+(?:questo\s+)?promemoria\s+per\s+(?:il\s+giorno\s+)?(\d{2}\/\d{2}\/\d{4})(?:\s+(?:alle|ore)\s+(\d{1,2}:\d{2}))?\s*:\s*(.+)$/i);
+    const text = String(command || '').trim();
+
+    // Promemoria relativi: "fra 10 minuti", "tra 2 ore",
+    // anche dettati come "e ricordami di ...".
+    const relative = text.match(/^(?:jarvis[, ]*)?(?:fammi|creami|crea|imposta)\\s+(?:(?:questo|un)\\s+)?promemori[ae]\\s+(?:fra|tra)\\s+(\\d+)\\s*(secondi?|minuti?|ore?|giorni?)\\b([\\s\\S]*)$/i);
+    if (relative) {
+      const amount = Number(relative[1]);
+      const unit = relative[2].toLowerCase();
+      const multiplier = unit.startsWith('second') ? 1000 :
+        unit.startsWith('minut') ? 60000 :
+        unit.startsWith('or') ? 3600000 : 86400000;
+      const duration = amount * multiplier;
+      if (!Number.isSafeInteger(amount) || amount < 1 || !Number.isSafeInteger(duration) || duration > 365 * 86400000) {
+        throw new Error('Intervallo non valido. Usa un tempo da 1 secondo a 365 giorni.');
+      }
+      let body = relative[3].trim();
+      body = body.replace(/^(?:[,;:]?\\s*)(?:e\\s+)?(?:ricordami(?:\\s+di)?|di)\\s+/i, '');
+      body = body.replace(/^\\s*[:,-]\\s*/, '').trim();
+      if (!body) {
+        throw new Error('Manca il testo del promemoria. Per esempio: “fammi un promemoria fra 10 minuti e ricordami di controllare la pasta”.');
+      }
+      const due = new Date(Date.now() + duration);
+      return {
+        body: body,
+        due_at: due.toISOString(),
+        date: due.toLocaleDateString('it-IT'),
+        time: due.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }),
+        relative: amount + ' ' + unit
+      };
+    }
+
+    const match = text.match(/^(?:jarvis[, ]*)?(?:fammi|creami|crea|imposta)\\s+(?:(?:questo|un)\\s+)?promemori[ae]\\s+per\\s+(?:il\\s+giorno\\s+)?(\\d{2}\\/\\d{2}\\/\\d{4})(?:\\s+(?:alle|ore)\\s+(\\d{1,2}:\\d{2}))?\\s*:\\s*(.+)$/i);
     if (!match) return null;
     const parts = match[1].split('/').map(Number);
     const time = (match[2] || '09:00').split(':').map(Number);
@@ -597,11 +628,11 @@
       catch (error) { reply(error.message || 'Non riesco a leggere i promemoria.'); }
       return;
     }
-    if (/promemoria/.test(normalized) && /(?:fammi|creami|crea|imposta)/.test(normalized)) {
+    if (/promemori[ae]/.test(normalized) && /(?:fammi|creami|crea|imposta)/.test(normalized)) {
       try {
         const reminder = parseReminderCommand(command);
         if (!reminder) {
-          reply('Per creare un promemoria scriva: “fammi questo promemoria per il giorno 06/11/2026 alle 09:00: testo”. Se omette l’orario, userò le 09:00.');
+          reply('Non ho creato nulla: formato non riconosciuto. Può dire “fammi un promemoria fra 10 minuti e ricordami di controllare la pasta” oppure “fammi un promemoria per il giorno 06/11/2026 alle 09:00: testo”.');
           return;
         }
         await reminderRequest('/reminders', {
@@ -609,7 +640,10 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ body: reminder.body, due_at: reminder.due_at })
         });
-        reply('Promemoria salvato per il ' + reminder.date + ' alle ' + reminder.time + '. Riceverà un’email quando sarà il momento.');
+        const when = reminder.relative
+          ? 'tra ' + reminder.relative + ' (circa alle ' + reminder.time + ')'
+          : 'il ' + reminder.date + ' alle ' + reminder.time;
+        reply('Promemoria salvato per ' + when + '. Riceverà un’email quando sarà il momento.');
       } catch (error) {
         reply(error.message || 'Non sono riuscito a salvare il promemoria.');
       }
